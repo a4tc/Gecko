@@ -1,0 +1,70 @@
+name: Extract GPB source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract source from download bundle
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t bundles < <(
+            find . -type f -iname 'GeckoPresence-*-DOWNLOAD-BUNDLE*.zip' \
+              -not -path './.git/*' | sort
+          )
+
+          if [[ ${#bundles[@]} -ne 1 ]]; then
+            echo "Expected exactly one download bundle; found ${#bundles[@]}." >&2
+            printf '%s\n' "${bundles[@]}" >&2
+            exit 1
+          fi
+
+          mkdir -p _gpb_bundle _gpb_work
+          unzip -tq "${bundles[0]}"
+          unzip -q "${bundles[0]}" -d _gpb_bundle
+
+          mapfile -t sources < <(
+            find _gpb_bundle -type f -iname 'GeckoPresence-Suite-*-Source*.zip' | sort
+          )
+
+          if [[ ${#sources[@]} -ne 1 ]]; then
+            echo "Expected exactly one source ZIP; found ${#sources[@]}." >&2
+            find _gpb_bundle -type f -iname '*.zip' -print | sort >&2
+            exit 1
+          fi
+
+          unzip -tq "${sources[0]}"
+          unzip -q "${sources[0]}" -d _gpb_work
+
+          mapfile -t hosts < <(
+            find _gpb_work -type d -name GeckoPresenceHost | sort
+          )
+
+          if [[ ${#hosts[@]} -ne 1 ]]; then
+            echo "Expected exactly one GeckoPresenceHost directory; found ${#hosts[@]}." >&2
+            exit 1
+          fi
+
+          suite_dir="$(dirname "${hosts[0]}")"
+          echo "suite_dir=$suite_dir" >> "$GITHUB_OUTPUT"
+          echo "Extracted suite: $suite_dir"
+
+      - name: Upload extracted source
+        uses: actions/upload-artifact@v4
+        with:
+          name: gecko-presence-extracted-source
+          path: ${{ steps.extract.outputs.suite_dir }}/
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
