@@ -1,25 +1,62 @@
-      - name: Unzip GeckoPresence bundle and source
+name: Unzip GeckoPresence bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract bundle and source ZIP
         shell: bash
         run: |
           set -euo pipefail
 
-          BUNDLE="$(find . -maxdepth 1 -type f \
-            -iname 'GeckoPresence-*-DOWNLOAD-BUNDLE*.zip' -print -quit)"
-          if [[ -z "$BUNDLE" ]]; then
-            echo "Download bundle ZIP not found in the repository checkout." >&2
+          mapfile -t bundles < <(
+            find . -type f -iname 'GeckoPresence-*-DOWNLOAD-BUNDLE*.zip' \
+              -not -path './.git/*' \
+              -not -path './_gpb_bundle/*' \
+              -not -path './_gpb_work/*' | sort
+          )
+
+          if [[ ${#bundles[@]} -ne 1 ]]; then
+            echo "Expected exactly one download bundle; found ${#bundles[@]}." >&2
+            printf '%s\n' "${bundles[@]}" >&2
             exit 1
           fi
 
           mkdir -p _gpb_bundle _gpb_work
-          unzip -tq "$BUNDLE"
-          unzip -oq "$BUNDLE" -d _gpb_bundle
+          unzip -tq "${bundles[0]}"
+          unzip -oq "${bundles[0]}" -d _gpb_bundle
 
-          SOURCE="$(find _gpb_bundle -type f \
-            -iname 'GeckoPresence-Suite-*-Source*.zip' -print -quit)"
-          if [[ -z "$SOURCE" ]]; then
-            echo "Source ZIP not found inside the download bundle." >&2
+          mapfile -t sources < <(
+            find _gpb_bundle -type f \
+              -iname 'GeckoPresence-Suite-*-Source*.zip' | sort
+          )
+
+          if [[ ${#sources[@]} -ne 1 ]]; then
+            echo "Expected exactly one source ZIP in the bundle; found ${#sources[@]}." >&2
+            find _gpb_bundle -type f -iname '*.zip' -print | sort >&2 || true
             exit 1
           fi
 
-          unzip -tq "$SOURCE"
-          unzip -oq "$SOURCE" -d _gpb_work
+          unzip -tq "${sources[0]}"
+          unzip -oq "${sources[0]}" -d _gpb_work
+
+          echo "Extracted source files:"
+          find _gpb_work -maxdepth 4 -type f | sort | head -200
+
+      - name: Upload extracted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeckoPresence-extracted-source
+          path: _gpb_work/
+          if-no-files-found: error
+          retention-days: 7
