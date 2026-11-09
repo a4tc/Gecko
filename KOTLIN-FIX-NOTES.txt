@@ -1,0 +1,6 @@
+GECKO PRESENCE 0.4.0 — KOTLIN FIX 1
+
+Fixed MainActivity.kt compile error at the Android app picker ScrollView child insertion.
+Changed ScrollView.LayoutParams(-1, -2) to FrameLayout.LayoutParams(-1, -2) and added the FrameLayout import. ScrollView extends FrameLayout, so FrameLayout.LayoutParams is the matching layout-parameter type.
+
+The archive and static source assertions were checked after patching. A full Android Gradle compile has NOT been run in this environment; run the GitHub Actions workflow to verify the Android build.

@@ -1,0 +1,12 @@
+GECKO PRESENCE 0.4.0 — GITHUB SETUP BUNDLE
+
+Upload this ZIP to the ROOT of your GitHub repository. Keep the filename unchanged.
+
+Then create the actual GitHub Actions workflow at:
+  .github/workflows/build.yml
+
+The workflow file is included as build.yml in this bundle. A ZIP stored in a repository is not automatically unpacked; GitHub Actions runs the workflow to extract it on the runner.
+
+The workflow accepts either this outer DOWNLOAD-BUNDLE ZIP or the inner GeckoPresence-Suite-0.4.0-Source.zip. Upload exactly one archive, not both.
+
+The first build runs in Preview mode. Discord SDK support is enabled only after the official SDK AAR and DISCORD_APP_ID are configured.
