@@ -1,3 +1,0 @@
-d4a008e97428bbedb045f430de753fb61b21c2696bd14bddf151a1aed929ecac  GeckoPresence-Suite-0.4.0-Source.zip
-77bc6c65b00b43a9f7f32c7fa4e5ee2c6ee74f481af4ff0e6021568db21dea49  GeckoPresenceBridge-0.4.0-unsigned.xpi
-2ef942eafa42c6212a2e8034cbcc8c30b2220facb4bffd7b839e2f84ddbde8f6  build-gecko-presence-0.4.0.yml
