@@ -33,11 +33,11 @@ jobs:
           }
           unzip -t "$ARCHIVE"
           unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/gpb-source"
-          SOURCE_ROOT="$(find "$RUNNER_TEMP/gpb-source" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -printf '%h\n' | head -n 1)"
-          if [ -z "$SOURCE_ROOT" ]; then
-            SOURCE_ROOT="$(find "$RUNNER_TEMP/gpb-source" -type d -name GeckoPresence-Suite-0.5.0 -print -quit)"
-          fi
-          test -n "$SOURCE_ROOT" && test -d "$SOURCE_ROOT"
+          HOST_SETTINGS="$(find "$RUNNER_TEMP/gpb-source" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+          test -n "$HOST_SETTINGS"
+          SOURCE_ROOT="$(dirname "$(dirname "$HOST_SETTINGS")")"
+          test -d "$SOURCE_ROOT/GeckoPresenceHost"
+          test -d "$SOURCE_ROOT/GeckoPresenceBridge"
           echo "GPB_SOURCE_ROOT=$SOURCE_ROOT" >> "$GITHUB_ENV"
           echo "Source root: $SOURCE_ROOT"
 
