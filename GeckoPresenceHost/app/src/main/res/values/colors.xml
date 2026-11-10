@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="screen_bg">#0B0B09</color>
+    <color name="panel_bg">#171713</color>
+    <color name="panel_stroke">#77701D</color>
+    <color name="accent_cyan">#FFE500</color>
+    <color name="accent_cyan_dark">#B7A700</color>
+    <color name="accent_pink">#FF665E</color>
+    <color name="text_primary">#F6F3E8</color>
+    <color name="text_secondary">#D7D2BE</color>
+    <color name="text_muted">#AAA58F</color>
+    <color name="line">#4B481D</color>
+    <color name="status_green">#C7F36B</color>
+    <color name="status_red">#FF6258</color>
+</resources>

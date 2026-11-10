@@ -1,201 +1,129 @@
-
-name: Gecko Presence 0.4.0 — Android APK + Firefox XPI
+name: Gecko Presence 0.5.0 Build
 
 on:
-  push:
-    paths:
-      - '.github/workflows/gecko.yml'
-      - 'GeckoPresence-Suite-*-Source.zip'
-  pull_request:
-    paths:
-      - '.github/workflows/gecko.yml'
-      - 'GeckoPresence-Suite-*-Source.zip'
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "GeckoPresence-Suite-0.5.0-Source.zip"
+      - ".github/workflows/gecko-presence-0.5.0.yml"
 
 permissions:
   contents: read
 
 jobs:
-  build-suite:
-    name: Test and build GPB
+  build:
+    name: Build Android APK and Firefox XPI
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      DISCORD_APP_ID: ${{ vars.DISCORD_APP_ID }}
-      DISCORD_SDK_AAR_PATH: ${{ vars.DISCORD_SDK_AAR_PATH }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Extract Gecko Presence source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="GeckoPresence-Suite-0.5.0-Source.zip"
+          test -f "$ARCHIVE" || {
+            echo "::error::Missing $ARCHIVE at repository root."
+            exit 1
+          }
+          unzip -t "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/gpb-source"
+          SOURCE_ROOT="$(find "$RUNNER_TEMP/gpb-source" -type f \( -name settings.gradle -o -name settings.gradle.kts \) -printf '%h\n' | head -n 1)"
+          if [ -z "$SOURCE_ROOT" ]; then
+            SOURCE_ROOT="$(find "$RUNNER_TEMP/gpb-source" -type d -name GeckoPresence-Suite-0.5.0 -print -quit)"
+          fi
+          test -n "$SOURCE_ROOT" && test -d "$SOURCE_ROOT"
+          echo "GPB_SOURCE_ROOT=$SOURCE_ROOT" >> "$GITHUB_ENV"
+          echo "Source root: $SOURCE_ROOT"
+
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Set up Node.js 22
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            **/package-lock.json
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK platform and build tools
+      - name: Verify and build extension
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Set up Gradle 8.10.2
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.10.2'
-
-      - name: Validate and extract source ZIP
-        id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          ARCHIVES=(GeckoPresence-Suite-*-Source.zip)
-
-          if [[ ${#ARCHIVES[@]} -ne 1 ]]; then
-            echo "Expected exactly one GeckoPresence-Suite-*-Source.zip at repository root; found ${#ARCHIVES[@]}." >&2
-            printf 'Found: %s\n' "${ARCHIVES[@]}" >&2
-            echo 'Root files:' >&2
-            ls -la >&2
-            exit 1
+          PACKAGE_JSON="$(find "$GPB_SOURCE_ROOT" -path '*/node_modules' -prune -o -name package.json -print | grep -E '/(extension|GeckoPresenceBridge)/package.json$' | head -n 1 || true)"
+          if [ -z "$PACKAGE_JSON" ]; then
+            PACKAGE_JSON="$(find "$GPB_SOURCE_ROOT" -path '*/node_modules' -prune -o -name package.json -print | head -n 1)"
           fi
-
-          SOURCE_ZIP="${ARCHIVES[0]}"
-          echo "Using source archive: $SOURCE_ZIP"
-          unzip -tq "$SOURCE_ZIP"
-
-          rm -rf _gpb_work
-          mkdir -p _gpb_work
-          unzip -q "$SOURCE_ZIP" -d _gpb_work
-
-          HOST_SETTINGS="$(find _gpb_work -type f -path '*/GeckoPresenceHost/settings.gradle.kts' -print -quit)"
-          if [[ -z "$HOST_SETTINGS" ]]; then
-            echo 'GeckoPresenceHost/settings.gradle.kts was not found in the source ZIP.' >&2
-            find _gpb_work -maxdepth 7 -print >&2
-            exit 1
-          fi
-
-          HOST_DIR="${HOST_SETTINGS%/settings.gradle.kts}"
-          SUITE_DIR="$(dirname "$HOST_DIR")"
-          BRIDGE_DIR="$SUITE_DIR/GeckoPresenceBridge"
-
-          if [[ ! -f "$BRIDGE_DIR/package.json" || ! -d "$BRIDGE_DIR/src" || ! -f "$BRIDGE_DIR/extension/manifest.json" ]]; then
-            echo 'GeckoPresenceBridge source or extension files are missing beside GeckoPresenceHost.' >&2
-            find "$SUITE_DIR" -maxdepth 4 -print >&2 || true
-            exit 1
-          fi
-
-          MAIN_ACTIVITY="$HOST_DIR/app/src/main/java/app/geckopresence/host/MainActivity.kt"
-          if [[ ! -f "$MAIN_ACTIVITY" ]] || ! grep -Fq 'import android.widget.FrameLayout' "$MAIN_ACTIVITY" || ! grep -Fq 'FrameLayout.LayoutParams(-1, -2)' "$MAIN_ACTIVITY"; then
-            echo 'The source ZIP does not contain the expected FrameLayout Kotlin fix. Replace the ZIP with the corrected source archive.' >&2
-            exit 1
-          fi
-
-          echo "host_dir=$HOST_DIR" >> "$GITHUB_OUTPUT"
-          echo "bridge_dir=$BRIDGE_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: Prepare optional Discord Social SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-          HOST_DIR='${{ steps.source.outputs.host_dir }}'
-          AAR_TARGET="$HOST_DIR/app/libs/discord_partner_sdk.aar"
-          mkdir -p "$(dirname "$AAR_TARGET")"
-
-          if [[ -n "${DISCORD_SDK_AAR_PATH:-}" ]]; then
-            AAR_SOURCE="$GITHUB_WORKSPACE/$DISCORD_SDK_AAR_PATH"
-            if [[ ! -f "$AAR_SOURCE" ]]; then
-              echo "DISCORD_SDK_AAR_PATH is set, but the file does not exist: $DISCORD_SDK_AAR_PATH" >&2
-              exit 1
-            fi
-            if [[ -z "${DISCORD_APP_ID:-}" ]]; then
-              echo 'DISCORD_APP_ID must also be set when supplying the SDK AAR.' >&2
-              exit 1
-            fi
-            cp "$AAR_SOURCE" "$AAR_TARGET"
-            sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
-            echo 'Official Discord SDK AAR and Application ID found; SDK build enabled.'
+          test -n "$PACKAGE_JSON"
+          EXT_DIR="$(dirname "$PACKAGE_JSON")"
+          echo "Extension package: $EXT_DIR"
+          cd "$EXT_DIR"
+          if [ -f package-lock.json ]; then
+            npm ci
           else
-            echo 'Preview build: no Discord SDK AAR configured. Discord connection will not be enabled in this APK.'
+            npm install
+          fi
+          npm run import:premid --if-present
+          npm run build
+          npm test --if-present
+          if [ -x node_modules/.bin/web-ext ]; then
+            node_modules/.bin/web-ext lint --source-dir .
+          fi
+          mkdir -p "$RUNNER_TEMP/gpb-output"
+          find . -maxdepth 3 -type f -name '*.xpi' -exec cp {} "$RUNNER_TEMP/gpb-output/" \;
+          if [ -f manifest.json ]; then
+            zip -qr "$RUNNER_TEMP/gpb-output/GeckoPresenceBridge-0.5.0-unsigned.xpi" manifest.json .
           fi
 
-      - name: Install extension dependencies and run tests
-        working-directory: ${{ steps.source.outputs.bridge_dir }}
-        run: |
-          npm install --no-audit --no-fund
-          npm test
-
-      - name: Lint Gecko extension (diagnostic)
-        continue-on-error: true
-        working-directory: ${{ steps.source.outputs.bridge_dir }}
-        run: npx web-ext lint --source-dir extension
-
-      - name: Bundle extension into APK and package Firefox XPI
+      - name: Build Android debug APK
         shell: bash
         run: |
           set -euo pipefail
-          HOST_DIR='${{ steps.source.outputs.host_dir }}'
-          BRIDGE_DIR='${{ steps.source.outputs.bridge_dir }}'
-          ASSET_DIR="$HOST_DIR/app/src/main/assets/gpb-extension"
-
-          rm -rf "$ASSET_DIR"
-          mkdir -p "$ASSET_DIR"
-          cp -a "$BRIDGE_DIR/extension/." "$ASSET_DIR/"
-          (cd "$BRIDGE_DIR/extension" && zip -q -r "$GITHUB_WORKSPACE/GeckoPresenceBridge-0.4.0-unsigned.xpi" . -x '*/.DS_Store')
-
-          test -f "$ASSET_DIR/manifest.json"
-          test -f "$ASSET_DIR/background.js"
-          test -f "$ASSET_DIR/content/generic-media.js"
-          test -s "$GITHUB_WORKSPACE/GeckoPresenceBridge-0.4.0-unsigned.xpi"
-
-      - name: Compile, test and assemble Android APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          HOST_DIR='${{ steps.source.outputs.host_dir }}'
-
-          if [[ -f "$HOST_DIR/app/libs/discord_partner_sdk.aar" && -n "${DISCORD_APP_ID:-}" ]]; then
-            export ORG_GRADLE_PROJECT_DISCORD_APP_ID="$DISCORD_APP_ID"
-          else
-            export ORG_GRADLE_PROJECT_DISCORD_APP_ID=''
+          GRADLEW="$(find "$GPB_SOURCE_ROOT" -type f -name gradlew -print -quit)"
+          if [ -z "$GRADLEW" ]; then
+            echo "::error::Gradle wrapper (gradlew) not found in source archive."
+            exit 1
           fi
+          GRADLE_DIR="$(dirname "$GRADLEW")"
+          chmod +x "$GRADLEW"
+          cd "$GRADLE_DIR"
+          "$GRADLEW" --no-daemon assembleDebug
+          mkdir -p "$RUNNER_TEMP/gpb-output"
+          find . -type f -path '*/build/outputs/apk/*/*.apk' -exec cp {} "$RUNNER_TEMP/gpb-output/GeckoPresence-0.5.0-Android-debug.apk" \;
 
-          gradle --no-daemon --stacktrace --console=plain -p "$HOST_DIR" \
-            :app:compileDebugKotlin \
-            :app:testDebugUnitTest \
-            :app:assembleDebug
-
-          APK="$HOST_DIR/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          cp "$APK" "$GITHUB_WORKSPACE/GeckoPresence-0.4.0-debug.apk"
-
-      - name: Generate SHA-256 checksums
+      - name: Generate checksums and build manifest
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum \
-            GeckoPresence-0.4.0-debug.apk \
-            GeckoPresenceBridge-0.4.0-unsigned.xpi \
-            > GeckoPresence-0.4.0-SHA256SUMS.txt
+          cd "$RUNNER_TEMP/gpb-output"
+          test -n "$(find . -maxdepth 1 -type f -print -quit)"
+          sha256sum * > SHA256SUMS.txt
+          {
+            echo "Gecko Presence 0.5.0"
+            echo "Commit: $GITHUB_SHA"
+            echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "Artifacts:"
+            ls -lh
+          } > BUILD-MANIFEST.txt
 
-      - name: Upload APK, XPI and checksums
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GeckoPresence-0.4.0-build
-          path: |
-            GeckoPresence-0.4.0-debug.apk
-            GeckoPresenceBridge-0.4.0-unsigned.xpi
-            GeckoPresence-0.4.0-SHA256SUMS.txt
+          name: GeckoPresence-0.5.0-build
+          path: ${{ runner.temp }}/gpb-output/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
