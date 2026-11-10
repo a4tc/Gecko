@@ -1,12 +1,34 @@
-GECKO PRESENCE 0.4.0 — GITHUB SETUP BUNDLE
+GECKO PRESENCE SUITE 0.4.0 — PATCHED SOURCE BUNDLE
 
-Upload this ZIP to the ROOT of your GitHub repository. Keep the filename unchanged.
+This bundle contains:
+- GeckoPresence-Suite-0.4.0-Source.zip — complete source tree
+- .github/workflows/gecko.yml — GitHub Actions build workflow
+- GeckoPresenceBridge-0.4.0-unsigned.xpi — browser extension package for signing/testing
+- SHA256SUMS.txt — checksums for the packaged files
 
-Then create the actual GitHub Actions workflow at:
-  .github/workflows/build.yml
+IF THE GITHUB REPOSITORY ALREADY EXISTS
+1. Extract this outer ZIP locally.
+2. Replace the repository-root GeckoPresence-Suite-0.4.0-Source.zip with the included file.
+3. Keep .github/workflows/gecko.yml at that exact path.
+4. Commit and push both files, or use Actions → Gecko Presence 0.4.0 — Android APK + Firefox XPI → Run workflow.
 
-The workflow file is included as build.yml in this bundle. A ZIP stored in a repository is not automatically unpacked; GitHub Actions runs the workflow to extract it on the runner.
+The workflow extracts the source ZIP, runs the extension tests, copies the built extension into the APK assets, runs Android unit tests, and assembles the debug APK and unsigned XPI. Download the `GeckoPresence-0.4.0-build` artifact from the successful Actions run.
 
-The workflow accepts either this outer DOWNLOAD-BUNDLE ZIP or the inner GeckoPresence-Suite-0.4.0-Source.zip. Upload exactly one archive, not both.
+PREVIEW MODE
+The build is Preview mode unless both the official Discord Social SDK AAR and DISCORD_APP_ID are configured. Preview mode can test the local Android bridge and app detector, but cannot publish activity to a Discord profile.
 
-The first build runs in Preview mode. Discord SDK support is enabled only after the official SDK AAR and DISCORD_APP_ID are configured.
+ANDROID APP TRACKER TEST
+1. Grant Usage Access to Gecko Presence Host in Android Settings → Special app access → Usage access.
+2. Choose one ordinary test app (for example Spotify or YouTube), enable Track Selected Android Apps, and start the local bridge.
+3. Switch to the selected app and keep it foreground for 3–6 seconds.
+4. Return to Gecko Presence Host. The Android Sources panel should show polling/event diagnostics and the presence preview should show the selected app.
+5. Switch to an unselected app; the Android app activity should clear. Switch back to the selected app; it should return.
+6. Use COPY DETECTOR DIAGNOSTICS if detection does not work. The copied report contains permission, selection count, bridge/SDK state, and the latest detector status; it does not contain a usage timeline.
+
+IDLIX
+The extension now prioritizes JSON-LD Movie.name, Shaka video accessible labels, and player title metadata while ignoring browser-support/error gate headings. The document-title fallback removes the IDLIX site suffix and the Indonesian “Nonton” prefix.
+
+FIREFOX INSTALLATION
+The included XPI is unsigned. For normal Firefox Android installation, submit it to addons.mozilla.org as an unlisted add-on and install the signed XPI. Do not weaken Firefox or Tor protections to install it.
+
+TOR BROWSER remains experimental and requires testing against the exact Tor Browser release.

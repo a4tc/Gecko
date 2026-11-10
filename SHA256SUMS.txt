@@ -1,3 +1,4 @@
-49a707482d1dea697f1aa9ba419535a88e4d73a23ac4418994c284e0745fa2f5  GeckoPresence-Suite-0.4.0-Source.zip
-77bc6c65b00b43a9f7f32c7fa4e5ee2c6ee74f481af4ff0e6021568db21dea49  GeckoPresenceBridge-0.4.0-unsigned.xpi
-2ef942eafa42c6212a2e8034cbcc8c30b2220facb4bffd7b839e2f84ddbde8f6  build-gecko-presence-0.4.0.yml
+e05459fdd6c6c8cde60694b639312661d8fb7f9da6dc23634af90710bc6f2049  GeckoPresence-Suite-0.4.0-Source.zip
+68b3cd232dd92eff455fec28d7b0e0bd66bc1a37606dc3be3b160375d7c591e2  GeckoPresenceBridge-0.4.0-unsigned.xpi
+8ea412506398bc656f185595cabeceea58470676b04ab0e0956e36cb669d845f  .github/workflows/gecko.yml
+2ef942eafa42c6212a2e8034cbcc8c30b2220facb4bffd7b839e2f84ddbde8f6  build.yml
