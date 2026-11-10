@@ -217,7 +217,7 @@ class BridgeHttpServer(
             "sourceType" to json.optString("sourceType", "website"),
             "priority" to json.optInt("priority", 10),
         )
-        return BridgePayloadMapper.fromV2(payload, shareTitles())
+        return BridgePayloadMapper.fromV2(payload, sharePageTitles())
     }
 
     private fun parsePresence(json: JSONObject): PresenceUpdate? {
