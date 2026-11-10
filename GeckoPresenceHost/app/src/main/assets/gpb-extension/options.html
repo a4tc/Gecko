@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Gecko Presence // Control Deck</title>
+  <link rel="stylesheet" href="options.css">
+  <script type="module" src="options.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="brand-row">
+        <span class="brand-mark" aria-hidden="true">GPB_</span>
+        <span class="serial">SIGNAL DECK / BROWSER MODULE 04</span>
+      </div>
+      <p class="eyebrow">LOCAL ACTIVITY TRANSPORT</p>
+      <h1>YOUR TAB.<br><em>YOUR SIGNAL.</em></h1>
+      <p class="intro">Browser activity to the Gecko Presence Android app. Only the foreground tab is published; full URLs and query strings stay local to the browser.</p>
+      <div class="stripe" aria-hidden="true"></div>
+    </header>
+
+    <section class="panel" aria-labelledby="connection-heading">
+      <div class="section-head">
+        <span class="section-number">01</span>
+        <div><p class="eyebrow">LOCAL TRANSPORT</p><h2 id="connection-heading">Android bridge</h2></div>
+        <code class="port">127.0.0.1:32145</code>
+      </div>
+      <label class="toggle-row" for="bridge-enabled">
+        <span><strong>Enable local bridge</strong><small>Send foreground browser activity to the Android app.</small></span>
+        <input id="bridge-enabled" type="checkbox">
+      </label>
+      <div class="field">
+        <label for="pairing-key">PAIRING KEY</label>
+        <div class="key-row">
+          <input id="pairing-key" type="password" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the key exported by the Android app">
+          <button id="reveal-key" class="button secondary" type="button">SHOW</button>
+        </div>
+        <small>Stored in extension-local storage. Sent only to 127.0.0.1—not to the website or Discord.</small>
+      </div>
+      <div class="actions">
+        <button id="save-settings" class="button primary" type="button">SAVE SETTINGS</button>
+        <button id="check-health" class="button secondary" type="button">CHECK HOST</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite">Loading settings…</p>
+    </section>
+
+    <section class="panel" aria-labelledby="detection-heading">
+      <div class="section-head">
+        <span class="section-number">02</span>
+        <div><p class="eyebrow">PER-SITE ACCESS</p><h2 id="detection-heading">Website detection</h2></div>
+      </div>
+      <p class="explain">Grant access one domain at a time. This avoids a blanket request for every website, which may fail or be blocked by Firefox/Tor permission handling.</p>
+      <div class="field">
+        <label for="site-host">WEBSITE DOMAIN OR URL</label>
+        <div class="key-row">
+          <input id="site-host" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="https://idlixplus.net">
+          <button id="add-site" class="button primary" type="button">GRANT</button>
+        </div>
+        <small>Example: https://idlixplus.net. Access is limited to that website. You can revoke it below.</small>
+      </div>
+      <div class="permission-list-head"><strong>GRANTED SITES</strong><span id="site-count">0 ACTIVE</span></div>
+      <div id="site-origin-list" class="site-list" aria-live="polite">
+        <p class="empty">No extra website permissions. YouTube's built-in detector remains available.</p>
+      </div>
+      <div class="privacy-note">
+        <span class="note-mark">!</span>
+        <p>Banking, payment, finance, password, authentication, identity, government, health, and communication domains are blocked by the extension policy even if a permission is granted accidentally.</p>
+      </div>
+    </section>
+
+    <section class="panel compact" aria-labelledby="recognition-heading">
+      <div class="section-head">
+        <span class="section-number">03</span>
+        <div><p class="eyebrow">MEDIA ADAPTERS</p><h2 id="recognition-heading">Known sources</h2></div>
+      </div>
+      <div class="service-list" aria-label="Recognized websites">
+        <span>YouTube</span><span>Netflix</span><span>Twitch</span><span>Spotify</span>
+        <span>Instagram</span><span>TikTok</span><span>Chess.com</span><span>IDLix*</span>
+        <span class="muted-service">Other supported HTML5 players</span>
+      </div>
+      <p class="footnote">*IDLix title extraction uses page title and common movie-heading selectors. The player must expose HTML5 media playback events. An embedded third-party player may require its own domain permission.</p>
+    </section>
+
+
+    <section class="panel" aria-labelledby="preview-heading">
+      <div class="section-head">
+        <span class="section-number">04</span>
+        <div><p class="eyebrow">DISCORD ACTIVITY MODEL</p><h2 id="preview-heading">Activity preview</h2></div>
+      </div>
+      <div class="presence-card" aria-live="polite">
+        <div class="presence-art" aria-hidden="true">GPB</div>
+        <img id="preview-artwork" class="presence-image" alt="Activity artwork" hidden>
+        <div class="presence-copy">
+          <strong id="preview-name">Waiting for activity</strong>
+          <span id="preview-details">No active browser signal.</span>
+          <span id="preview-state" class="muted">—</span>
+          <small id="preview-source">Source: none</small>
+          <small id="preview-type">Activity type: —</small>
+        </div>
+      </div>
+      <p id="preview-transport" class="status" role="status">Transport: checking…</p>
+      <p class="footnote">This preview shows the normalized activity requested by GPB. It does not prove that Discord received or displayed it.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="studio-heading">
+      <div class="section-head">
+        <span class="section-number">05</span>
+        <div><p class="eyebrow">MANUAL OVERRIDE</p><h2 id="studio-heading">Custom presence studio</h2></div>
+      </div>
+      <label class="toggle-row" for="manual-enabled">
+        <span><strong>Enable manual override</strong><small>Overrides browser and Android automatic activity until disabled.</small></span>
+        <input id="manual-enabled" type="checkbox">
+      </label>
+      <div class="field">
+        <label for="manual-type">ACTIVITY TYPE</label>
+        <select id="manual-type" class="studio-select">
+          <option value="Playing">Playing — supported by current SDK transport</option>
+          <option value="Watching" disabled>Watching — requires SDK transport capability</option>
+          <option value="Listening" disabled>Listening — requires SDK transport capability</option>
+          <option value="Streaming" disabled>Streaming — requires SDK transport capability</option>
+          <option value="Competing" disabled>Competing — requires SDK transport capability</option>
+        </select>
+        <small>UAM and adapter previews retain all activity types. This build's native Discord transport publishes Playing only.</small>
+      </div>
+      <div class="field"><label for="manual-name">ACTIVITY NAME</label><input class="studio-input" id="manual-name" maxlength="80" placeholder="Example: Visual Studio Code"></div>
+      <div class="field"><label for="manual-details">DETAILS</label><input class="studio-input" id="manual-details" maxlength="120" placeholder="Example: Building Gecko Presence"></div>
+      <div class="field"><label for="manual-state">STATE (OPTIONAL)</label><input class="studio-input" id="manual-state" maxlength="120" placeholder="Example: Implementing adapter engine"></div>
+      <div class="field">
+        <label for="manual-preset-name">PRESET NAME</label>
+        <div class="key-row"><input id="manual-preset-name" type="text" maxlength="40" placeholder="Example: Coding session"><button id="manual-preset-store" class="button secondary" type="button">STORE</button></div>
+      </div>
+      <div class="field">
+        <label for="manual-preset-select">SAVED PRESETS</label>
+        <select id="manual-preset-select" class="studio-select"><option value="">No saved presets</option></select>
+      </div>
+      <div class="actions"><button id="manual-preset-apply" class="button secondary" type="button">APPLY PRESET</button><button id="manual-preset-delete" class="button secondary" type="button">DELETE PRESET</button></div>
+      <div class="actions"><button id="manual-save" class="button primary" type="button">SAVE & ACTIVATE</button><button id="manual-disable" class="button secondary" type="button">DISABLE OVERRIDE</button></div>
+      <p id="manual-status" class="status" role="status">Automatic activity is active.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="lab-heading">
+      <div class="section-head">
+        <span class="section-number">06</span>
+        <div><p class="eyebrow">RUNTIME INSPECTION</p><h2 id="lab-heading">Developer lab</h2></div>
+      </div>
+      <div class="lab-grid">
+        <div><small>ACTIVE ADAPTER</small><strong id="lab-adapter">—</strong></div>
+        <div><small>FRAME / EXECUTION</small><strong id="lab-frame">—</strong></div>
+        <div><small>BRIDGE STATUS</small><strong id="lab-bridge">—</strong></div>
+        <div><small>INSTALLED ADAPTERS</small><strong id="lab-count">—</strong></div>
+      </div>
+      <div class="permission-list-head"><strong>EVENT TRACE</strong><span id="lab-event-count">0 EVENTS</span></div>
+      <ol id="lab-events" class="lab-events"><li>Waiting for runtime diagnostics…</li></ol>
+      <div class="actions"><button id="lab-refresh" class="button secondary" type="button">REFRESH</button><button id="lab-export" class="button primary" type="button">COPY REDACTED REPORT</button></div>
+      <p id="lab-status" class="status" role="status">Diagnostics are local to this browser profile.</p>
+    </section>
+
+    <footer><span>GPB / SIGNAL DECK</span><span>LOCAL API / v2</span></footer>
+  </main>
+</body>
+</html>
