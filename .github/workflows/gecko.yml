@@ -21,7 +21,6 @@ jobs:
     timeout-minutes: 45
     env:
       DISCORD_APP_ID: ${{ vars.DISCORD_APP_ID || '1569772369344602173' }}
-      DISCORD_SDK_AAR_PATH: ${{ vars.DISCORD_SDK_AAR_PATH }}
 
     steps:
       - name: Checkout
@@ -62,7 +61,7 @@ jobs:
           test -f GeckoPresenceHost/app/src/main/java/app/geckopresence/host/PresenceEngineService.kt
           test -f GeckoPresenceHost/app/src/main/java/app/geckopresence/host/BrowserAccessibilityService.kt
           test -f GeckoPresenceHost/app/src/main/java/app/geckopresence/host/MediaSessionPresenceTracker.kt
-          if grep -R -nE 'BridgeHttpServer|SecureStore|XPI|Firefox extension runtime' GeckoPresenceHost/app/src/main; then
+          if grep -R -nE 'BridgeHttpServer|SecureStore|(^|[^[:alnum:]_])XPI([^[:alnum:]_]|$)|Firefox extension runtime' GeckoPresenceHost/app/src/main; then
             echo "Legacy browser bridge code remains in Android runtime." >&2
             exit 1
           fi
@@ -71,24 +70,32 @@ jobs:
         working-directory: GeckoPresenceHost
         run: sh scripts/verify-source.sh
 
-      - name: Configure optional Discord Social SDK AAR
+      - name: Download and verify Discord Social SDK AAR
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          AAR_TARGET="$GITHUB_WORKSPACE/GeckoPresenceHost/app/libs/discord_partner_sdk.aar"
-          mkdir -p "$(dirname "$AAR_TARGET")"
-          if [[ -n "${DISCORD_SDK_AAR_PATH:-}" ]]; then
-            AAR_SOURCE="$GITHUB_WORKSPACE/$DISCORD_SDK_AAR_PATH"
-            test -f "$AAR_SOURCE" || { echo "Configured Discord SDK AAR not found: $AAR_SOURCE" >&2; exit 1; }
-            cp "$AAR_SOURCE" "$AAR_TARGET"
-          elif [[ -f "$GITHUB_WORKSPACE/discord_partner_sdk.aar" ]]; then
-            cp "$GITHUB_WORKSPACE/discord_partner_sdk.aar" "$AAR_TARGET"
-          fi
-          if [[ -f "$AAR_TARGET" && "${DISCORD_APP_ID:-}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "Discord Direct Rich Presence build enabled."
-          else
-            echo "Building local preview mode; Discord publishing is disabled."
-          fi
+
+          AAR_DIR="$GITHUB_WORKSPACE/GeckoPresenceHost/app/libs"
+          AAR="$AAR_DIR/discord_partner_sdk.aar"
+
+          mkdir -p "$AAR_DIR"
+
+          gh release download sdk-1.10.19337 \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern discord_partner_sdk.aar \
+            --dir "$AAR_DIR"
+
+          test -s "$AAR"
+
+          printf '%s  %s\n' \
+            'b1b2491f1e1848c79fd6f1986d5aa1e0c8019e88a6e62c7be06b89e8e4870933' \
+            "$AAR" | sha256sum --check
+
+          unzip -t "$AAR" >/dev/null
+
+          echo "Discord Social SDK AAR downloaded and verified."
 
       - name: Test and assemble APK
         working-directory: GeckoPresenceHost
