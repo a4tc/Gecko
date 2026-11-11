@@ -33,6 +33,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import app.geckopresence.host.core.PresenceRules
+import app.geckopresence.host.core.PresenceActivityMapper
 
 class MainActivity : Activity() {
     private val COLOR_BACKGROUND: Int get() = getColor(R.color.screen_bg)
@@ -159,7 +160,7 @@ class MainActivity : Activity() {
         root.addView(navScroll)
 
         val bodyScroll = ScrollView(this).apply {
-            fillViewport = true
+            isFillViewport = true
             isVerticalScrollBarEnabled = false
         }
         pageContent = LinearLayout(this).apply {
@@ -220,7 +221,7 @@ class MainActivity : Activity() {
         val statusCard = card()
         engineStatus = text("ENGINE / ${runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED")}", 12, COLOR_ACCENT, true, mono = true)
         discordStatus = text("DISCORD / ${runtime.getString(PresenceEngineService.KEY_SDK_STATE, "SDK_MISSING")}", 12, COLOR_TEXT, true, mono = true)
-        statusMessage = text(runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Start the engine to initialize Direct RPC."), 12, COLOR_MUTED)
+        statusMessage = text(runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Start the engine to initialize Direct RPC.").orEmpty(), 12, COLOR_MUTED)
         statusCard.addView(engineStatus)
         statusCard.addView(discordStatus, marginTop(8))
         statusCard.addView(statusMessage, marginTop(12))
@@ -237,7 +238,7 @@ class MainActivity : Activity() {
 
         pageContent.addView(sectionTitle("CURRENT ACTIVITY", "A local preview of the winning source"), marginTop(22))
         val previewCard = card()
-        currentActivity = text(runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source"), 14, COLOR_TEXT, true)
+        currentActivity = text(runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source").orEmpty(), 14, COLOR_TEXT, true)
         previewCard.addView(text("DISCORD ACTIVITY PREVIEW", 10, COLOR_ACCENT, true, mono = true))
         previewCard.addView(currentActivity, marginTop(12))
         previewCard.addView(text("The card reflects the current winning source. Discord delivery status is shown separately above.", 11, COLOR_MUTED), marginTop(12))
@@ -245,8 +246,8 @@ class MainActivity : Activity() {
 
         pageContent.addView(sectionTitle("SOURCE HEALTH", "Permission and detector status"), marginTop(22))
         val sourceCard = card()
-        appSourceStatus = text(runtime.getString(PresenceEngineService.KEY_APP_TRACKER_STATUS, "App detector not started"), 12, COLOR_TEXT)
-        mediaSourceStatus = text(runtime.getString(PresenceEngineService.KEY_MEDIA_TRACKER_STATUS, "Media detector not started"), 12, COLOR_TEXT)
+        appSourceStatus = text(runtime.getString(PresenceEngineService.KEY_APP_TRACKER_STATUS, "App detector not started").orEmpty(), 12, COLOR_TEXT)
+        mediaSourceStatus = text(runtime.getString(PresenceEngineService.KEY_MEDIA_TRACKER_STATUS, "Media detector not started").orEmpty(), 12, COLOR_TEXT)
         sourceCard.addView(text("ANDROID APP DETECTOR", 10, COLOR_ACCENT, true, mono = true))
         sourceCard.addView(appSourceStatus, marginTop(6))
         sourceCard.addView(text("MEDIA SESSION DETECTOR", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
@@ -574,7 +575,7 @@ class MainActivity : Activity() {
             setHintTextColor(COLOR_MUTED)
             hint = label
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             filters = arrayOf(android.text.InputFilter.LengthFilter(maxLength))
             minHeight = dp(48)

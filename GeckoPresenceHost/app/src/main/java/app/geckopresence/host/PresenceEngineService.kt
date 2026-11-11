@@ -14,6 +14,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.IBinder
 import app.geckopresence.host.core.PresenceSourceArbiter
 import app.geckopresence.host.core.PresenceUpdate
 
@@ -93,6 +94,8 @@ class PresenceEngineService : Service() {
         publishStatus(lastStatusMessage)
         updateNotification("Native presence engine running")
     }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
