@@ -1,51 +1,35 @@
-# Gecko Presence — Android app
+# Gecko Presence — Android application
 
-The Android application is the primary product and the only required APK. It owns local settings, foreground Android app tracking, the localhost bridge, secure pairing storage, Discord SDK adapter, and an embedded browser-extension bundle that can be exported to XPI on demand.
+The Android application is the complete product runtime. It owns navigation, source configuration, native source adapters, priority arbitration, manual presence, local presets, mock preview, diagnostics, and the optional Discord Social SDK Direct Rich Presence publisher.
 
-## What the APK does
+## Runtime modules
 
-- Tracks only explicitly selected, launchable Android apps through Android Usage Access.
-- Provides a searchable allowlist with app icons and package names.
-- Rechecks the privacy denylist when foreground events arrive; saved selections cannot override blocked categories.
-- Uses `127.0.0.1:32145` as the only HTTP bind address.
-- Stores the bridge secret with Android Keystore AES-256-GCM.
-- Exports the bundled Gecko extension to an unsigned `.xpi` when the user selects **EXPORT FIREFOX XPI**.
-- Imports/restores a copied 256-bit pairing key so a debug-signature migration does not have to break the browser pairing.
-- Gives one Android setting control over whether browser media titles may be passed to Discord.
-- Uses the SIGNAL DECK black/yellow brutalist design system.
+- `PresenceEngineService`: foreground lifecycle, source arbitration, candidate expiry, and Discord publisher coordination.
+- `UsageAppTracker`: selected foreground packages from Usage Access; no UI scraping or usage-history persistence.
+- `MediaSessionPresenceTracker`: active media sessions through the user-enabled Notification Listener; notification contents are not read.
+- `BrowserAccessibilityService`: selected-browser address-bar host detection only; no page DOM or body text extraction.
+- `PresencePriorityPolicy`: user-adjustable automatic source priorities; manual presence is fixed at 100.
+- `PresencePresetStore`: local-only saved presets.
+- `DiscordSdk` + JNI/CMake: official Discord Social SDK AAR adapter. Preview builds work without the AAR but do not publish.
 
-## What Android tracking can observe
+## Permissions
 
-`UsageStatsManager.queryEvents` reports foreground app transitions. It does not reveal another app's movie title, music metadata, messages, current UI, or notification text. The app therefore reports a conservative label/template for selected apps. A richer title requires a documented app-owned API or an explicitly approved integration. This product does not use Accessibility scraping or Notification Listener access.
+All sources default off. Usage Access, Notification Access, and Accessibility access are optional and independently controlled. Browser detection needs Accessibility's window-content capability because Android exposes the address field through `AccessibilityNodeInfo`; the implementation restricts reads to selected browser packages and known address-bar resource IDs. If no matching address-bar node is exposed, it reports no website candidate.
 
-## Discord integration gate
+## Discord SDK build
 
-The conditional native integration is present in Kotlin/JNI/CMake form, but the official `discord_partner_sdk.aar` is not included. Discord distributes the AAR from its Developer Portal onboarding after approval. The user must also supply the numeric Application ID from their own Discord application.
+Place the official `discord_partner_sdk.aar` at `app/libs/discord_partner_sdk.aar` and configure `DISCORD_APP_ID` as a Gradle property or GitHub repository variable. The AAR is not included in the source archive. Do not redistribute the AAR unless the SDK license permits it.
 
-Discord's current mobile Social SDK announcements and documentation describe support for mobile **games**. Approval for a general-purpose presence companion is unconfirmed. Do not assume that a submitted companion application will be approved.
-
-To enable the SDK build:
-
-1. Complete the official Discord Social SDK onboarding and obtain the official Android AAR.
-2. Keep the AAR in an access-controlled/private repository or artifact store.
-3. Set GitHub repository variable `DISCORD_APP_ID` to the numeric application ID.
-4. Optionally set `DISCORD_SDK_AAR_PATH` to the AAR path relative to the repository root, e.g. `private-sdk/discord_partner_sdk.aar`.
-5. Run the root suite workflow.
-
-When either SDK input is absent, the workflow intentionally builds Preview mode. The preview supports the local bridge, Android tracking, allowlist, presence preview, and bundled XPI export; it does not claim Discord publishing is connected.
-
-## Build and verify
-
-From the combined suite root:
+## Local tests
 
 ```sh
-cd GeckoPresenceBridge
-npm install --no-audit --no-fund
-npm test
-cd ../GeckoPresenceHost
 sh scripts/test-core.sh
 ```
 
-The full APK build uses the root `.github/workflows/build.yml` workflow, JDK 17, Gradle 8.10.2, Android SDK Platform 35, NDK and CMake. The current container session does not contain Android SDK/Gradle, so the APK must be built by GitHub Actions before device installation.
+Full Android build:
 
-See the root `docs/` directory for architecture, privacy contract, design system, research and release gates.
+```sh
+gradle :app:testDebugUnitTest :app:assembleDebug
+```
+
+The full Gradle build requires JDK 17, Gradle 8.10.2, Android SDK Platform 35, NDK 27.2.12479018, and CMake 3.22.1.

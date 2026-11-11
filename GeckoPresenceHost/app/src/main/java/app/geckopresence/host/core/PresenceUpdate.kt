@@ -9,4 +9,6 @@ data class PresenceUpdate(
     val startTimestampSeconds: Long,
     val sourceType: String = "website",
     val priority: Int = 10,
+    /** A zero value means the candidate does not expire. */
+    val expiresAtEpochMillis: Long = 0L,
 )

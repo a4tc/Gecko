@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <permission
+        android:name="app.geckopresence.host.permission.INTERNAL_BROADCAST"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="app.geckopresence.host.permission.INTERNAL_BROADCAST" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -9,6 +14,16 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <queries>
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.fennec_fdroid" />
+        <package android:name="org.torproject.torbrowser" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.vivaldi.browser" />
+        <package android:name="com.brave.browser" />
+        <package android:name="com.opera.browser" />
+        <package android:name="com.microsoft.emmx" />
+        <package android:name="com.sec.android.app.sbrowser" />
+        <package android:name="com.duckduckgo.mobile.android" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -25,7 +40,6 @@
 
         <activity
             android:name=".MainActivity"
-            android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -34,25 +48,37 @@
         </activity>
 
         <service
-            android:name=".PresenceBridgeService"
+            android:name=".PresenceEngineService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-started local browser-to-Discord Rich Presence bridge" />
+                android:value="User-started native Rich Presence source monitoring and publishing" />
         </service>
 
-        <activity
-            android:name="com.discord.socialsdk.AuthenticationActivity"
+        <service
+            android:name=".PresenceNotificationListener"
             android:exported="true"
-            android:launchMode="singleTask"
-            tools:ignore="MissingClass">
+            android:label="@string/media_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="${discordRedirectScheme}" />
+                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
-        </activity>
+        </service>
+
+        <service
+            android:name=".BrowserAccessibilityService"
+            android:exported="true"
+            android:label="@string/browser_accessibility_label"
+            android:description="@string/browser_accessibility_description"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/browser_accessibility_service" />
+        </service>
+
     </application>
 </manifest>

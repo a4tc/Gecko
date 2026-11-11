@@ -4,7 +4,7 @@
 
 PreMiD's publicly documented activity model is useful as a reference: a site-specific activity module reads a small amount of page context and maps it to a presence payload. The public Activity library and developer docs show concepts such as site identity, title/state, buttons, metadata and per-site modules.
 
-Important source boundary: PreMiD's own README states that its activity definitions are open source while the main extension is not currently open source. This project therefore does not claim to reverse-engineer or reproduce the closed extension. GPB uses public documentation and its own implementation with a separate local Android bridge.
+Important source boundary: PreMiD's own README states that its activity definitions are open source while the main extension is not currently open source. This project therefore does not claim to reverse-engineer or reproduce the closed extension. GPB uses public documentation and its own native Android implementation; no browser bridge is part of the shipped runtime.
 
 References:
 - https://github.com/PreMiD/PreMiD
@@ -18,7 +18,7 @@ References:
 - `vinithreddybanda/activities` demonstrates an Android-first Discord presence project using Discord Social SDK concepts. Its license and current SDK compatibility must be inspected before any code reuse.
   - https://github.com/vinithreddybanda/activities
 
-## GPB adapter contract (planned evolution)
+## GPB adapter contract (research-only reference)
 
 Each site adapter should declare:
 

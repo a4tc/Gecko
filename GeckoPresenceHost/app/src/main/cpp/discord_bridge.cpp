@@ -23,8 +23,6 @@ std::thread g_callbackThread;
 JavaVM* g_javaVm = nullptr;
 jclass g_discordSdkClass = nullptr;
 jmethodID g_statusMethod = nullptr;
-jmethodID g_sessionMethod = nullptr;
-std::uint64_t g_applicationId = 0;
 
 void LogError(const char* message) {
     __android_log_write(ANDROID_LOG_ERROR, kLogTag, message);
@@ -93,29 +91,6 @@ void NotifyStatus(const std::string& status, const std::string& error = "") {
     if (env->ExceptionCheck()) env->ExceptionClear();
 }
 
-void NotifySession(const std::string& refreshToken, std::int32_t expiresInSeconds) {
-    JavaVM* vm = g_javaVm;
-    jclass callbackClass = g_discordSdkClass;
-    jmethodID callbackMethod = g_sessionMethod;
-    if (vm == nullptr || callbackClass == nullptr || callbackMethod == nullptr) return;
-
-    ScopedJniEnv scoped(vm);
-    JNIEnv* env = scoped.get();
-    if (env == nullptr) return;
-
-    jstring javaRefreshToken = env->NewStringUTF(refreshToken.c_str());
-    if (javaRefreshToken != nullptr) {
-        env->CallStaticVoidMethod(
-            callbackClass,
-            callbackMethod,
-            javaRefreshToken,
-            static_cast<jint>(expiresInSeconds),
-        );
-        env->DeleteLocalRef(javaRefreshToken);
-    }
-    if (env->ExceptionCheck()) env->ExceptionClear();
-}
-
 std::shared_ptr<discordpp::Client> GetClient() {
     std::lock_guard<std::mutex> lock(g_clientMutex);
     return g_client;
@@ -146,33 +121,6 @@ void StartCallbackPump() {
     });
 }
 
-bool ApplyToken(
-    const std::shared_ptr<discordpp::Client>& client,
-    const std::string& accessToken,
-    bool connectAfterUpdate
-) {
-    if (!client || accessToken.empty()) return false;
-
-    try {
-        client->UpdateToken(
-            discordpp::AuthorizationTokenType::Bearer,
-            accessToken,
-            [client, connectAfterUpdate](discordpp::ClientResult result) {
-                if (!result.Successful()) {
-                    NotifyStatus("error", "Discord rejected the OAuth session token");
-                    return;
-                }
-                if (connectAfterUpdate) {
-                    client->Connect();
-                }
-            }
-        );
-        return true;
-    } catch (...) {
-        NotifyStatus("error", "Discord token update failed");
-        return false;
-    }
-}
 }
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
@@ -208,25 +156,18 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
             "onNativeStatus",
             "(Ljava/lang/String;Ljava/lang/String;)V"
         );
-        g_sessionMethod = env->GetStaticMethodID(
-            g_discordSdkClass,
-            "onNativeSession",
-            "(Ljava/lang/String;I)V"
-        );
-        if (g_statusMethod == nullptr || g_sessionMethod == nullptr) {
+        if (g_statusMethod == nullptr) {
             if (env->ExceptionCheck()) env->ExceptionClear();
             env->DeleteGlobalRef(g_discordSdkClass);
             g_discordSdkClass = nullptr;
             g_statusMethod = nullptr;
-            g_sessionMethod = nullptr;
             LogError("Could not resolve DiscordSdk callback methods");
             return JNI_FALSE;
         }
 
-        g_applicationId = static_cast<std::uint64_t>(applicationId);
         try {
             auto client = std::make_shared<discordpp::Client>();
-            client->SetApplicationId(g_applicationId);
+            client->SetApplicationId(static_cast<std::uint64_t>(applicationId));
             client->SetStatusChangedCallback(
                 [](discordpp::Client::Status status,
                    discordpp::Client::Error error,
@@ -246,7 +187,6 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
             env->DeleteGlobalRef(g_discordSdkClass);
             g_discordSdkClass = nullptr;
             g_statusMethod = nullptr;
-            g_sessionMethod = nullptr;
             LogError("Discord Social SDK client initialization failed");
             return JNI_FALSE;
         }
@@ -258,96 +198,9 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_app_geckopresence_host_DiscordSdk_nativeAuthorize(JNIEnv*, jobject) {
-    auto client = GetClient();
-    if (!client) return JNI_FALSE;
-
-    try {
-        auto codeVerifier = client->CreateAuthorizationCodeVerifier();
-        discordpp::AuthorizationArgs args{};
-        args.SetClientId(g_applicationId);
-        args.SetScopes(client->GetDefaultPresenceScopes());
-        args.SetCodeChallenge(codeVerifier.Challenge());
-
-        NotifyStatus("authorizing");
-        client->Authorize(
-            std::move(args),
-            [client, verifier = std::move(codeVerifier)](discordpp::ClientResult authorizationResult,
-                                                         std::string authorizationCode,
-                                                         std::string redirectUri) mutable {
-                if (!authorizationResult.Successful() || authorizationCode.empty()) {
-                    NotifyStatus("error", "Discord authorization was not completed");
-                    return;
-                }
-
-                client->GetToken(
-                    g_applicationId,
-                    authorizationCode,
-                    verifier.Verifier(),
-                    redirectUri,
-                    [client](discordpp::ClientResult tokenResult,
-                             std::string accessToken,
-                             std::string refreshToken,
-                             discordpp::AuthorizationTokenType tokenType,
-                             std::int32_t expiresIn,
-                             std::string) {
-                        if (!tokenResult.Successful() || accessToken.empty()) {
-                            NotifyStatus("error", "Discord OAuth token exchange failed");
-                            return;
-                        }
-
-                        client->UpdateToken(
-                            tokenType,
-                            accessToken,
-                            [client,
-                             refreshToken = std::move(refreshToken),
-                             expiresIn](discordpp::ClientResult updateResult) {
-                                if (!updateResult.Successful()) {
-                                    NotifyStatus("error", "Discord rejected the OAuth token");
-                                    return;
-                                }
-                                if (!refreshToken.empty()) {
-                                    NotifySession(refreshToken, expiresIn);
-                                }
-                                client->Connect();
-                            }
-                        );
-                    }
-                );
-            }
-        );
-        return JNI_TRUE;
-    } catch (...) {
-        NotifyStatus("error", "Discord authorization could not be started");
-        return JNI_FALSE;
-    }
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_app_geckopresence_host_DiscordSdk_nativeConnectWithAccessToken(
-    JNIEnv* env,
-    jobject,
-    jstring accessTokenValue
-) {
-    const std::string accessToken = FromJavaString(env, accessTokenValue);
-    return ApplyToken(GetClient(), accessToken, true) ? JNI_TRUE : JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_app_geckopresence_host_DiscordSdk_nativeRefreshAccessToken(
-    JNIEnv* env,
-    jobject,
-    jstring accessTokenValue
-) {
-    const std::string accessToken = FromJavaString(env, accessTokenValue);
-    return ApplyToken(GetClient(), accessToken, false) ? JNI_TRUE : JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
 Java_app_geckopresence_host_DiscordSdk_nativeSetActivity(
     JNIEnv* env,
     jobject,
-    jstring nameValue,
     jstring detailsValue,
     jstring stateValue,
     jlong startTimestampSeconds
@@ -355,14 +208,12 @@ Java_app_geckopresence_host_DiscordSdk_nativeSetActivity(
     auto client = GetClient();
     if (!client) return JNI_FALSE;
 
-    const std::string name = FromJavaString(env, nameValue);
     const std::string details = FromJavaString(env, detailsValue);
     const std::string state = FromJavaString(env, stateValue);
 
     try {
         discordpp::Activity activity;
         activity.SetType(discordpp::ActivityTypes::Playing);
-        if (!name.empty()) activity.SetName(name);
         if (!details.empty()) activity.SetDetails(details);
         if (!state.empty()) activity.SetState(state);
 
@@ -377,6 +228,8 @@ Java_app_geckopresence_host_DiscordSdk_nativeSetActivity(
             [](discordpp::ClientResult result) {
                 if (!result.Successful()) {
                     NotifyStatus("presence_error", "Discord did not accept the Rich Presence update");
+                } else {
+                    NotifyStatus("presence_updated");
                 }
             }
         );
@@ -393,20 +246,12 @@ Java_app_geckopresence_host_DiscordSdk_nativeClear(JNIEnv*, jobject) {
     if (!client) return;
     try {
         discordpp::Activity emptyActivity;
-        client->UpdateRichPresence(std::move(emptyActivity), [](discordpp::ClientResult) {});
+        client->UpdateRichPresence(std::move(emptyActivity), [](discordpp::ClientResult result) {
+            if (result.Successful()) NotifyStatus("presence_cleared");
+            else NotifyStatus("presence_error", "Discord did not accept the clear request");
+        });
     } catch (...) {
         NotifyStatus("presence_error", "Could not clear Rich Presence");
-    }
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_app_geckopresence_host_DiscordSdk_nativeDisconnect(JNIEnv*, jobject) {
-    auto client = GetClient();
-    if (!client) return;
-    try {
-        client->Disconnect();
-    } catch (...) {
-        NotifyStatus("error", "Discord disconnect failed");
     }
 }
 
@@ -424,11 +269,6 @@ Java_app_geckopresence_host_DiscordSdk_nativeDestroy(JNIEnv* env, jobject) {
     }
 
     if (client) {
-        try {
-            client->Disconnect();
-        } catch (...) {
-            LogError("Discord client disconnect during destroy failed");
-        }
         client.reset();
     }
 
@@ -438,6 +278,4 @@ Java_app_geckopresence_host_DiscordSdk_nativeDestroy(JNIEnv* env, jobject) {
         g_discordSdkClass = nullptr;
     }
     g_statusMethod = nullptr;
-    g_sessionMethod = nullptr;
-    g_applicationId = 0;
 }

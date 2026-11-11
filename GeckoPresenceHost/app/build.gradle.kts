@@ -16,7 +16,7 @@ if (configuredDiscordAppId.isNotEmpty() && discordAppId <= 0L) {
 }
 
 if (discordSdkAar.exists() && discordAppId <= 0L) {
-    logger.warn("Discord SDK AAR found, but DISCORD_APP_ID is not configured. Building local-bridge preview mode.")
+    logger.warn("Discord SDK AAR found, but DISCORD_APP_ID is not configured. Building local preview mode.")
 }
 
 android {
@@ -27,12 +27,11 @@ android {
         applicationId = "app.geckopresence.host"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
 
         buildConfigField("boolean", "DISCORD_SDK_ENABLED", discordSdkEnabled.toString())
         buildConfigField("long", "DISCORD_APP_ID", "${discordAppId}L")
-        manifestPlaceholders["discordRedirectScheme"] = "discord-${if (discordAppId > 0L) discordAppId else "not-configured"}"
 
         if (discordSdkEnabled) {
             ndk {
@@ -96,6 +95,5 @@ dependencies {
 
     if (discordSdkEnabled) {
         implementation(files(discordSdkAar))
-        implementation("androidx.browser:browser:1.8.0")
     }
 }

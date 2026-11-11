@@ -12,9 +12,17 @@ object PresenceSourceArbiter {
         return current.filterValues { it.sourceType != sourceType }
     }
 
-    fun winner(current: Map<String, PresenceUpdate>): PresenceUpdate? {
-        return current.values.maxWithOrNull(
-            compareBy<PresenceUpdate> { it.priority }.thenBy { it.startTimestampSeconds },
-        )
+    fun active(
+        current: Map<String, PresenceUpdate>,
+        nowEpochMillis: Long = System.currentTimeMillis(),
+    ): Map<String, PresenceUpdate> = current.filterValues { candidate ->
+        candidate.expiresAtEpochMillis == 0L || candidate.expiresAtEpochMillis > nowEpochMillis
     }
+
+    fun winner(
+        current: Map<String, PresenceUpdate>,
+        nowEpochMillis: Long = System.currentTimeMillis(),
+    ): PresenceUpdate? = active(current, nowEpochMillis).values.maxWithOrNull(
+        compareBy<PresenceUpdate> { it.priority }.thenBy { it.startTimestampSeconds },
+    )
 }

@@ -1,55 +1,66 @@
-# Discord Social SDK Setup Notes
+# Discord Social SDK — Android Direct Rich Presence
 
-## SDK package and approval
+## Required SDK package
 
-The Android integration uses Discord's official Social SDK Android AAR with Android Prefab and CMake. The required CMake import is:
+Gecko Presence integrates Discord's official Android Social SDK through the AAR and Android Prefab/CMake:
 
 ```cmake
 find_package(discord_partner_sdk REQUIRED CONFIG)
 target_link_libraries(gecko_presence_native PRIVATE discord_partner_sdk::discord_partner_sdk log)
 ```
 
-The SDK AAR is a Discord-distributed binary. This project cannot generate it. Obtain it from the official Discord Developer Portal after completing the Social SDK onboarding and receiving access for the application.
+Obtain `discord_partner_sdk.aar` from the Discord Developer Portal through the official Social SDK onboarding process. The project cannot generate or redistribute this proprietary binary. Place it at:
 
-Discord currently positions the Social SDK as a game integration, including its mobile support announcement. Whether a general-purpose Android Rich Presence companion qualifies is not confirmed. Ask Discord for eligibility before spending time on a release build. Do not use unofficial mirrors or undocumented Discord endpoints as a substitute.
+```text
+GeckoPresenceHost/app/libs/discord_partner_sdk.aar
+```
 
-## GitHub Actions configuration
+The AAR is not included in this source archive. Keep it in private/access-controlled storage and comply with Discord's SDK terms. Current Discord documentation and onboarding are game-focused; eligibility for a general-purpose Android presence companion has not been confirmed by this project.
 
-- `DISCORD_APP_ID`: repository variable containing the numeric Application ID from your Discord Developer Portal application.
-- `DISCORD_SDK_AAR_PATH`: optional repository variable containing a path relative to the repository root, such as `private-sdk/discord_partner_sdk.aar`.
+## Application ID
 
-The root suite workflow copies the AAR to `app/libs/discord_partner_sdk.aar` and passes the Application ID to Gradle. If either input is absent, the build is Preview mode. Do not put `DISCORD_APP_ID=0` in `gradle.properties`.
+The known application ID is configured in `gradle.properties`:
 
-## OAuth2 / PKCE flow
+```properties
+DISCORD_APP_ID=1569772369344602173
+```
 
-The native integration follows the documented public-client pattern:
+A Gradle property or GitHub repository variable named `DISCORD_APP_ID` may override the default. It must be a positive numeric ID. Do not commit a zero or placeholder value.
 
-1. `Client::CreateAuthorizationCodeVerifier()` creates the PKCE verifier/challenge.
-2. `AuthorizationArgs` uses the app ID, `Client::GetDefaultPresenceScopes()`, and the S256 challenge.
-3. `Client::Authorize()` launches the SDK authorization flow and receives the code through the configured mobile deep link.
-4. `Client::GetToken()` exchanges the code and verifier for tokens.
-5. `Client::UpdateToken()` must succeed before `Client::Connect()` is called.
-6. The SDK callback pump runs while the foreground service is active.
+For GitHub Actions, `DISCORD_SDK_AAR_PATH` may identify an AAR stored at a private path relative to the repository root. Alternatively, the workflow accepts `discord_partner_sdk.aar` at the repository root and copies it into `app/libs/` before the build.
 
-The refresh token is encrypted through Android Keystore. The access token is not persisted by the app; it is passed to the native SDK and refreshed in memory. Discord credentials never pass through the browser extension bridge.
+## Direct Rich Presence (no OAuth)
 
-## Mobile redirect
+Discord documents unauthenticated Rich Presence for Android from Social SDK 1.10. The Discord Android app must be installed and signed in, and the integration must use a valid Application ID. Direct RPC does not call `Client::Connect()` or the OAuth token APIs.
 
-Use this URI in the Developer Portal and keep the Android manifest's scheme consistent:
+The native adapter:
 
-`discord-YOUR_APP_ID:/authorize/callback`
+1. Creates a `discordpp::Client`.
+2. Calls `SetApplicationId()` with the registered application ID.
+3. Pumps `discordpp::RunCallbacks()` while the foreground presence engine is active.
+4. Builds a `discordpp::Activity` and submits it with `UpdateRichPresence()`.
+5. Submits an empty activity to clear the current presence.
 
-Replace `YOUR_APP_ID` with the numeric application ID. The manifest registers `com.discord.socialsdk.AuthenticationActivity`. The app calls `DiscordSocialSdkInit.setEngineActivity(activity)` before invoking the native authorization flow.
+Native client initialization is distinct from an authenticated `Ready` state. Kotlin permits Direct RPC updates after native initialization and reports acceptance/rejection from the SDK update callback.
 
-## Activity mapping and current limits
+No OAuth redirect activity, access token, refresh token, account credential, or browser login is used or stored by this runtime.
 
-Incoming activity events map to a Discord `Activity`:
+## Activity field mapping
 
-- `name` → activity name
-- `details` → details
-- optional `state` → state
-- `startTimestamp` → activity start timestamp
+Discord controls the first line — `Playing [application name]` — using the application name registered in the Developer Portal. That name cannot be customized per activity through `Activity.Name` for the partial Rich Presence object used by the SDK.
 
-The current native transport uses `ActivityTypes::Playing`; UAM activity types are retained in extension previews, but Watching/Listening/Streaming/Competing are not published as native Discord activity types by this SDK adapter. Registered artwork assets, buttons, party data and slideshow/dependency parity are not implemented in 0.5.0. Do not claim those features until added and tested against the approved SDK version.
+The current adapter maps:
 
-The extension may send activity updates before Discord reaches `Client::Status::Ready`. The host retains only the most recent activity and applies it after the SDK reports Ready; it does not queue an unbounded event history.
+- Source/activity label + user details → `Activity.details` (combined into one bounded 128-character line).
+- Optional state → `Activity.state`.
+- Start timestamp → `Activity.timestamps.start`.
+- Activity type → `Playing`.
+
+Artwork, custom buttons, party data, secrets, and other activity types are not currently exposed by the app UI or JNI adapter. Do not describe these as supported until the implementation and actual AAR are verified.
+
+## Build modes
+
+- **Preview mode:** built without the official AAR; local sources, editor, mock preview, automation, and presets can be exercised, but Discord publishing is disabled.
+- **Direct RPC mode:** enabled only when the official AAR is present and `DISCORD_APP_ID` is positive.
+
+GitHub Actions installs JDK 17, Android SDK Platform 35, NDK 27.2.12479018, CMake 3.22.1, and Gradle 8.10.2. It runs unit tests and assembles a debug APK. CI success does not prove live Discord publishing; a device test is still required.

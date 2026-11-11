@@ -1,48 +1,36 @@
-# Security Model
+# Security and privacy model
 
-## Assets
+## Data handled
 
-- Discord OAuth refresh token.
-- Ephemeral Discord OAuth access token.
-- Local bridge pairing key.
-- User activity and optional page title.
+- Selected Android package label and its current foreground state.
+- Optional active media-session title/artist when the user enables title sharing.
+- Optional normalized public website hostname from a selected browser address bar.
+- User-authored manual activity text and locally saved presets.
 
-## Trust boundaries
+## Source permissions
 
-- Firefox extension background context -> Android app loopback server.
-- Android Kotlin service -> native Discord SDK through JNI.
-- Android app -> Discord OAuth2 and Social SDK endpoints.
+- **Usage Access:** reads UsageEvents to identify only explicitly selected foreground applications. It does not read another app's UI, clipboard, messages, notification text, or internal storage.
+- **Notification Access:** enables `MediaSessionManager.getActiveSessions`. The `NotificationListenerService` does not inspect notification titles, bodies, actions, or extras.
+- **Accessibility:** enabled only for browser URL detection. The service is package-filtered to browsers selected by the user and searches known address-bar view IDs. It does not inspect arbitrary editable fields or page body text. It emits only the public hostname after sensitive-host filtering.
 
 ## Controls
 
-- The HTTP listener binds to `127.0.0.1` only.
-- Mutating routes require a 256-bit pairing key and constant-time comparison.
-- CORS only allows Firefox extension origins.
-- The Android app does not implement endpoints that return or accept Discord credentials from the extension.
-- OAuth uses Discord Social SDK and PKCE; there are no password fields, cookie reads, browser-storage scraping or user-token extraction.
-- Refresh token encryption uses an AES-256-GCM key in Android Keystore.
-- App backup is disabled to avoid restoring encrypted preference ciphertext without the device key.
-- Full URL and page title sharing are not enabled by default; the server stores only the most recent in-memory activity.
-- HTTP request size, header size and socket timeout are bounded.
-- Activity text is length-limited and strips control characters before native calls.
-- Tokens and activity payloads are not logged.
+- All source toggles default off.
+- Android apps require an explicit allowlist and are checked against a sensitive-app denylist when events arrive.
+- Browser packages require an explicit allowlist. URL paths, query parameters, fragments, credentials, and page titles are not sent to the presence engine.
+- Media titles and artist names are off by default and separately opt-in.
+- Automatic source candidates are held in memory, bounded, and expired when not refreshed. Manual presence is stored locally in app preferences until disabled.
+- The app does not request Discord OAuth, does not store Discord user tokens, and does not implement a browser-to-app HTTP server.
+- Activity text is length-limited before the native SDK call. Diagnostics exclude raw URLs, notification content, and package histories.
 
-## Operational controls
+## Trust boundaries
 
-- User explicitly starts and stops the foreground service.
-- A persistent notification indicates when the bridge is active.
-- Rotating the pairing key invalidates the previously copied key immediately.
-- Disconnect removes the stored refresh token.
-- Stopping the service closes the server socket and shuts down the SDK client.
+- Android system APIs -> native source adapters.
+- Kotlin presence model -> JNI -> official Discord Social SDK.
+- User-authored preferences -> local preset and priority stores.
+
+There is no extension runtime, XPI package, loopback bridge, pairing secret, remote adapter loader, or downloaded executable activity code.
 
 ## Known limits
 
-- The loopback key protects against accidental/untrusted requests; it is not a hardware-backed browser-to-app attestation mechanism. Keep the key private and rotate it if exposed.
-- A locally installed malicious app running under the same Android user may attempt to connect to loopback, but protected routes still require the high-entropy key.
-- Discord SDK availability and permitted use depend on Discord's Developer Portal enablement and SDK terms.
-- The app must be tested on-device for lifecycle, battery behaviour, OAuth deep links, and SDK compatibility before distribution.
-
-
-## Native app activity tracking
-
-See [APP_ACTIVITY_PRIVACY.md](APP_ACTIVITY_PRIVACY.md) for the Usage Access boundary, allowlist model, sensitive-app filtering, data minimization, and the deliberate exclusion of Notification Listener and Accessibility Service permissions.
+Accessibility resource IDs differ by browser version and OEM. Some browsers do not expose the address bar to Accessibility services, and private/incognito pages may behave differently. The app must be tested against the exact Firefox, Tor Browser, and OEM browser builds before claiming compatibility. Direct Rich Presence still requires the official AAR, Application ID, Discord app availability/sign-in, and policy approval for this app's use case.

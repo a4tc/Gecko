@@ -29,6 +29,28 @@ object PresenceRules {
         return normalized
     }
 
+
+    /** Extracts only a public web host from a browser address-bar value. Never returns paths or query data. */
+    fun extractPublicWebHost(raw: String?): String? {
+        if (raw.isNullOrBlank() || raw.length > 2_048) return null
+        val candidate = raw.trim()
+        if (candidate.any { it.isWhitespace() }) return null
+        val withScheme = if (candidate.startsWith("http://", true) || candidate.startsWith("https://", true)) {
+            candidate
+        } else {
+            "https://$candidate"
+        }
+        val uri = runCatching { java.net.URI(withScheme) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("http", true) && !uri.scheme.equals("https", true)) return null
+        if (uri.rawUserInfo != null) return null
+        val parsedHost = uri.host ?: return null
+        val host = sanitizeHost(parsedHost) ?: return null
+        if (!host.contains('.') || host.endsWith(".local") || host == "localhost") return null
+        if (host.matches(Regex("^[0-9.]+$"))) return null
+        if (isSensitiveHost(host)) return null
+        return host
+    }
+
     fun isSensitiveHost(host: String): Boolean {
         val normalized = host.trim().lowercase(Locale.ROOT).removePrefix("www.").removeSuffix(".")
         return sensitiveHosts.any { normalized == it || normalized.endsWith(".$it") } || sensitiveLabels.containsMatchIn(normalized)
@@ -44,7 +66,9 @@ object PresenceRules {
             .trim()
 
         if (cleaned.isEmpty()) return null
-        return cleaned.take(maxLength)
+        val codePointCount = cleaned.codePointCount(0, cleaned.length)
+        if (codePointCount <= maxLength) return cleaned
+        return cleaned.substring(0, cleaned.offsetByCodePoints(0, maxLength))
     }
 
     fun normalizeMediaState(raw: String?): String {

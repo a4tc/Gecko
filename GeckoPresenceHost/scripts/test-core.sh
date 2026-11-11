@@ -8,8 +8,8 @@ OUT="${TMPDIR:-/tmp}/gecko-presence-core-tests.jar"
 
 "$KOTLINC" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceRules.kt" \
+  "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceActivityMapper.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceUpdate.kt" \
-  "$ROOT/app/src/main/java/app/geckopresence/host/core/BridgePayloadMapper.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceSourceArbiter.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/AppActivityRules.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/ForegroundEventReducer.kt" \
