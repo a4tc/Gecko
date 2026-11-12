@@ -4,13 +4,11 @@
 #include <jni.h>
 #include <android/log.h>
 
-#include <atomic>
-#include <chrono>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <utility>
 
 namespace {
@@ -18,8 +16,6 @@ constexpr char kLogTag[] = "GeckoPresenceNative";
 
 std::mutex g_clientMutex;
 std::shared_ptr<discordpp::Client> g_client;
-std::atomic<bool> g_running{false};
-std::thread g_callbackThread;
 JavaVM* g_javaVm = nullptr;
 jclass g_discordSdkClass = nullptr;
 jmethodID g_statusMethod = nullptr;
@@ -105,21 +101,6 @@ std::string FromJavaString(JNIEnv* env, jstring value) {
     return result;
 }
 
-void StartCallbackPump() {
-    bool expected = false;
-    if (!g_running.compare_exchange_strong(expected, true)) return;
-
-    g_callbackThread = std::thread([] {
-        while (g_running.load()) {
-            try {
-                discordpp::RunCallbacks();
-            } catch (...) {
-                NotifyStatus("error", "Discord SDK callback loop failed");
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    });
-}
 
 }
 
@@ -135,6 +116,7 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
     jlong applicationId
 ) {
     if (applicationId <= 0) return JNI_FALSE;
+    NotifyStatus("checkpoint:native-init-entered");
 
     {
         std::lock_guard<std::mutex> lock(g_clientMutex);
@@ -167,7 +149,9 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
 
         try {
             auto client = std::make_shared<discordpp::Client>();
+            NotifyStatus("checkpoint:client-created");
             client->SetApplicationId(static_cast<std::uint64_t>(applicationId));
+            NotifyStatus("checkpoint:application-id-set");
             client->SetStatusChangedCallback(
                 [](discordpp::Client::Status status,
                    discordpp::Client::Error error,
@@ -182,6 +166,7 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
                     NotifyStatus(state, message);
                 }
             );
+            NotifyStatus("checkpoint:status-callback-registered");
             g_client = std::move(client);
         } catch (...) {
             env->DeleteGlobalRef(g_discordSdkClass);
@@ -192,9 +177,21 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
         }
     }
 
-    StartCallbackPump();
+    NotifyStatus("checkpoint:native-init-complete");
     NotifyStatus("initialized");
     return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_app_geckopresence_host_DiscordSdk_nativeRunCallbacks(JNIEnv*, jobject) {
+    if (!GetClient()) return;
+    try {
+        discordpp::RunCallbacks();
+    } catch (const std::exception& exception) {
+        NotifyStatus("callback_error", exception.what());
+    } catch (...) {
+        NotifyStatus("callback_error", "Unknown exception while executing Discord SDK callbacks");
+    }
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -257,11 +254,6 @@ Java_app_geckopresence_host_DiscordSdk_nativeClear(JNIEnv*, jobject) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_app_geckopresence_host_DiscordSdk_nativeDestroy(JNIEnv* env, jobject) {
-    g_running.store(false);
-    if (g_callbackThread.joinable()) {
-        g_callbackThread.join();
-    }
-
     std::shared_ptr<discordpp::Client> client;
     {
         std::lock_guard<std::mutex> lock(g_clientMutex);

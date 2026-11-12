@@ -37,11 +37,15 @@ for path in xml_files:
 sdk_kt = (app / "src/main/java/app/geckopresence/host/DiscordSdk.kt").read_text()
 native_cpp = (app / "src/main/cpp/discord_bridge.cpp").read_text()
 external_methods = re.findall(r"private\s+external\s+fun\s+(native[A-Za-z0-9_]+)", sdk_kt)
-if set(external_methods) != {"nativeInit", "nativeSetActivity", "nativeClear", "nativeDestroy"}:
+if set(external_methods) != {"nativeInit", "nativeRunCallbacks", "nativeSetActivity", "nativeClear", "nativeDestroy"}:
     raise SystemExit(f"Unexpected JNI declarations: {external_methods}")
 native_activity = re.search(r"nativeSetActivity\s*\((.*?)\): Boolean", sdk_kt, re.S)
 if native_activity is None or native_activity.group(1).count(": String") != 2:
     raise SystemExit("nativeSetActivity must accept only details, state, and timestamp")
+if "RunCallbacks" not in native_cpp or "std::thread" in native_cpp or "g_callbackThread" in native_cpp:
+    raise SystemExit("Discord callbacks must be pumped from the Android main-loop adapter, not a native worker thread")
+if "postDelayed(this, CALLBACK_INTERVAL_MS)" not in sdk_kt or "nativeRunCallbacks()" not in sdk_kt:
+    raise SystemExit("Discord callback pump must be scheduled on the Android main looper")
 if "activity.SetName(" in native_cpp:
     raise SystemExit("Activity.Name must remain controlled by the registered Discord application")
 mapper = (app / "src/main/java/app/geckopresence/host/core/PresenceActivityMapper.kt").read_text()
@@ -106,11 +110,28 @@ if "isFillViewport = true" not in activity_ui or "setSingleLine(true)" not in ac
 
 if "DISCORD_APP_ID=1569772369344602173" not in props:
     raise SystemExit("Known Discord Application ID default is missing")
+application = (app / "src/main/java/app/geckopresence/host/CrashDiagnostics.kt").read_text()
+manifest_app = manifest.find("./application")
+if manifest_app is None or manifest_app.attrib.get(android + "name") != ".GeckoPresenceApplication":
+    raise SystemExit("Application-level crash diagnostics must be installed from the Android Application")
+if "getHistoricalProcessExitReasons" not in application or "traceInputStream" not in application:
+    raise SystemExit("Crash diagnostics must capture ApplicationExitInfo and native tombstone streams")
+if "setDefaultUncaughtExceptionHandler" not in application or "recordCheckpoint" not in application:
+    raise SystemExit("Crash diagnostics must persist Java exceptions and pre-JNI checkpoints")
+profile_policy = (app / "src/main/java/app/geckopresence/host/core/AppPresenceProfile.kt").read_text()
+profile_store = (app / "src/main/java/app/geckopresence/host/AppPresenceProfileStore.kt").read_text()
+app_policy = (app / "src/main/java/app/geckopresence/host/AppPresencePolicy.kt").read_text()
+if any(token not in profile_policy for token in ("AppPresenceProfilePolicy", "MAX_ACTIVITY_LABEL_LENGTH", "MAX_DETAILS_LENGTH")):
+    raise SystemExit("Per-app profile text policy or bounds are missing")
+if "get(context, packageName)" not in app_policy or "AppPresenceProfileStore" not in profile_store:
+    raise SystemExit("Selected Android app profiles are not wired to the source adapter")
+if "PER-APP PROFILES" not in activity_ui or "SAVE APP PROFILE" not in activity_ui:
+    raise SystemExit("Presence Studio per-app profile editor is missing")
 
 workflow = (root.parent / ".github/workflows/gecko.yml").read_text()
 if "gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug" not in workflow:
     raise SystemExit("Android CI must run unit tests and assemble the debug APK")
 if "actions/setup-gradle@v6" not in workflow or "gradle-version: '8.10.2'" not in workflow:
     raise SystemExit("Android CI Gradle setup contract is missing")
-print(f"Source contract checks passed: {len(xml_files)} XML files, {len(external_methods)} JNI methods, native-only runtime, Discord field mapping, Android CI")
+print(f"Source contract checks passed: {len(xml_files)} XML files, {len(external_methods)} JNI methods, main-loop RPC callback pump, crash diagnostics, per-app profiles, native-only runtime, Android CI")
 PY

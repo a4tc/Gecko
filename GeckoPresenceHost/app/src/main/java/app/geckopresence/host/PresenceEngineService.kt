@@ -53,6 +53,7 @@ class PresenceEngineService : Service() {
                 }
             } catch (exception: Exception) {
                 Log.e(TAG, "Source broadcast failed", exception)
+                CrashDiagnostics.recordNonFatal(this@PresenceEngineService, "Presence source receiver", exception)
                 lastStatusMessage = "A source event failed: ${exception.javaClass.simpleName}"
                 recordEvent("Source event failed: ${exception.javaClass.simpleName}")
                 publishStatus(lastStatusMessage)
@@ -152,6 +153,7 @@ class PresenceEngineService : Service() {
         } catch (exception: Exception) {
             lastStatusMessage = "Engine action failed: ${exception.javaClass.simpleName}"
             Log.e(TAG, "Engine action failed: $action", exception)
+            CrashDiagnostics.recordNonFatal(this, "Presence engine action ${action ?: "restart"}", exception)
             recordEvent("Action failed (${action ?: "restart"}): ${exception.javaClass.simpleName}")
             publishStatus(lastStatusMessage)
         }
@@ -178,7 +180,8 @@ class PresenceEngineService : Service() {
         recordEvent("Discord RPC initialization requested by user")
         publishStatus(lastStatusMessage)
         try {
-            if (DiscordSdk.initialize(BuildConfig.DISCORD_APP_ID)) {
+            CrashDiagnostics.recordCheckpoint(this, "rpc-connect", "service received explicit connect request")
+            if (DiscordSdk.initialize(this, BuildConfig.DISCORD_APP_ID)) {
                 sdkState = SDK_INITIALIZED
                 lastStatusMessage = "Discord Direct RPC initialized"
                 currentWinner()?.let(DiscordSdk::setPresence)
@@ -391,7 +394,7 @@ class PresenceEngineService : Service() {
                 lastStatusMessage = "Discord accepted the clear request"
             }
             "presence_error" -> lastStatusMessage = error ?: "Discord rejected a presence update"
-            "error", "sdk_error" -> {
+            "error", "sdk_error", "callback_error" -> {
                 sdkState = SDK_ERROR
                 lastStatusMessage = error ?: "Discord Social SDK error"
                 recordEvent("Discord SDK error: ${lastStatusMessage.take(120)}")

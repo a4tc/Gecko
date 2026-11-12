@@ -1,4 +1,4 @@
-# Gecko Presence — Signal Deck 0.6.0
+# Gecko Presence — Signal Deck 0.6.1
 
 A native-first Android Rich Presence controller. The Android APK owns source discovery, activity composition, local presets, priority arbitration, preview, diagnostics, and Discord publishing. There is no browser extension, XPI, loopback HTTP bridge, browser pairing key, OAuth login, or Discord user-token flow in the runtime.
 
@@ -8,6 +8,7 @@ A native-first Android Rich Presence controller. The Android APK owns source dis
 - **Media sessions:** opt-in Notification Access through `MediaSessionManager`. Notification content is not read. Media title/artist sharing is a separate setting and is off by default.
 - **Browser / website:** optional Accessibility Service for selected browsers. It searches only known address-bar view IDs and emits a normalized public hostname. It does not inspect DOM, page text, form fields, passwords, paths, query parameters, or history. Some browser versions do not expose a stable address-bar node; compatibility is device/browser dependent.
 - **Custom Presence:** a manual override with a local mock preview and saved local presets. Manual presence always wins over automatic sources.
+- **Per-app Studio profiles:** selected Android packages can keep their own activity label, details, and optional state. Profiles are stored locally and used only by the matching app source.
 
 ## Product navigation
 
@@ -24,7 +25,7 @@ The current Discord native adapter publishes a source/details line, optional sta
 
 All sources are off by default. The app requests Usage Access, Notification Access, or Accessibility access only when the user enables the corresponding source. Browser detection uses a package allowlist and known address-field identifiers; if the browser hides the field, the adapter returns no candidate. Sensitive domains are rejected before a presence candidate is accepted. Candidate data is in-memory and expires when the source stops refreshing.
 
-See `docs/ARCHITECTURE-0.6.0.md`, `docs/PRIVACY-CONTRACT.md`, and `GeckoPresenceHost/docs/SECURITY.md`.
+See `docs/CHANGELOG-0.6.1.md`, `docs/ARCHITECTURE-0.6.0.md`, `docs/ARCHITECTURE-0.6.1-ADDENDUM.md`, `docs/PRIVACY-CONTRACT.md`, and `GeckoPresenceHost/docs/SECURITY.md`.
 
 ## Build
 
@@ -42,6 +43,8 @@ sh scripts/test-core.sh
 
 - `GeckoPresenceHost/`: Android application, native source adapters, service, UI, SDK JNI adapter.
 - `GeckoPresenceResearch/`: retained PreMiD/import research and third-party notices only; not built, packaged, loaded, or executed by the app.
-- `docs/ARCHITECTURE-0.6.0.md`: current native architecture.
+- `docs/ARCHITECTURE-0.6.0.md`: native architecture baseline.
+- `docs/ARCHITECTURE-0.6.1-ADDENDUM.md`: SDK callback lifecycle, per-app profiles, and crash diagnostics added in 0.6.1.
+- `docs/CHANGELOG-0.6.1.md`: 0.6.1 changes and verification boundaries.
 - `docs/PRIVACY-CONTRACT.md`: source-by-source data and permission contract.
 - `docs/DESIGN-SYSTEM.md`: SIGNAL DECK visual direction.

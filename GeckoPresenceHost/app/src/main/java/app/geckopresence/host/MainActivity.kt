@@ -35,6 +35,7 @@ import android.widget.TextView
 import android.widget.Toast
 import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceActivityMapper
+import app.geckopresence.host.core.AppPresenceProfile
 
 class MainActivity : Activity() {
     private val COLOR_BACKGROUND: Int get() = getColor(R.color.screen_bg)
@@ -61,6 +62,7 @@ class MainActivity : Activity() {
     private lateinit var developerMessage: TextView
     private lateinit var developerActivity: TextView
     private lateinit var developerEventLog: TextView
+    private lateinit var developerCrashStatus: TextView
     private var activePage = PAGE_DASHBOARD
     private var receiverRegistered = false
 
@@ -109,6 +111,22 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    @Deprecated("Uses the platform document picker for broad Android compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_EXPORT_CRASH_BUNDLE || resultCode != RESULT_OK) return
+        val destination = data?.data ?: return
+        val exported = runCatching {
+            contentResolver.openOutputStream(destination)?.use { output ->
+                CrashDiagnostics.exportBundle(this, output)
+            } ?: 0
+        }.getOrElse { error ->
+            Toast.makeText(this, "Crash export failed: ${error.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Exported $exported diagnostic files", Toast.LENGTH_LONG).show()
+    }
+
     private fun buildShell() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -151,7 +169,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(2), 0, 0)
         })
         header.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val version = text("ANDROID\n0.6.0", 9, COLOR_MUTED, true, mono = true).apply {
+        val version = text("ANDROID\n0.6.1", 9, COLOR_MUTED, true, mono = true).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
         header.addView(version)
@@ -450,7 +468,163 @@ class MainActivity : Activity() {
         editor.addView(actionButton("SAVE TO LIBRARY", false) { showSavePresetDialog(name.text.toString(), details.text.toString(), state.text.toString()) }, marginTop(8))
         pageContent.addView(editor)
         updatePreview()
+        buildAppProfileEditor()
     }
+
+    private fun buildAppProfileEditor() {
+        pageContent.addView(
+            sectionTitle("PER-APP PROFILES", "Give each selected Android app its own activity label, details and state"),
+            marginTop(22),
+        )
+        val profileCard = card()
+        profileCard.addView(text("AUTOMATIC APP PRESENCE", 10, COLOR_ACCENT, true, mono = true))
+        profileCard.addView(
+            text(
+                "These profiles apply only when the matching package wins Android app detection. Your global Studio override and other sources remain independent.",
+                11,
+                COLOR_MUTED,
+            ),
+            marginTop(6),
+        )
+        profileCard.addView(
+            text(
+                "The activity label is shown in the editable Details line. Discord's first-line application title remains the name registered for your Application ID in the Developer Portal.",
+                10,
+                COLOR_MUTED,
+            ),
+            marginTop(6),
+        )
+
+        val selectedPackages = settings.getStringSet(AppPresencePolicy.KEY_TRACKED_PACKAGES, emptySet()).orEmpty()
+        val availableApps = UsageAppTracker.selectableApps(this)
+            .filter { it.packageName in selectedPackages }
+            .sortedBy { it.label.lowercase() }
+        var selectedPackage = settings.getString(KEY_STUDIO_PROFILE_PACKAGE, "").orEmpty()
+        if (availableApps.none { it.packageName == selectedPackage }) selectedPackage = ""
+
+        val selectedApp = availableApps.firstOrNull { it.packageName == selectedPackage }
+        val selectedLabel = text(
+            selectedApp?.let { "${it.label}\n${it.packageName}" } ?: "No selected app",
+            12,
+            COLOR_TEXT,
+            true,
+            mono = selectedApp == null,
+        )
+        profileCard.addView(text("TARGET APPLICATION", 10, COLOR_MUTED, true, mono = true), marginTop(14))
+        profileCard.addView(selectedLabel, marginTop(6))
+        profileCard.addView(actionButton("CHOOSE SELECTED APP", false) {
+            if (availableApps.isEmpty()) {
+                AlertDialog.Builder(this)
+                    .setTitle("No app selected")
+                    .setMessage("Select applications in Sources first. Only your allow-listed apps can have automatic profiles.")
+                    .setNegativeButton("CLOSE", null)
+                    .setPositiveButton("OPEN SOURCES") { _, _ -> showPage(PAGE_SOURCES) }
+                    .show()
+                return@actionButton
+            }
+            val items = availableApps.map { "${it.label}\n${it.packageName}" }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Choose app profile")
+                .setItems(items) { _, index ->
+                    val packageName = availableApps[index].packageName
+                    settings.edit()
+                        .putString(KEY_STUDIO_PROFILE_PACKAGE, packageName)
+                        .remove(appProfileDraftKey(packageName, "label"))
+                        .remove(appProfileDraftKey(packageName, "details"))
+                        .remove(appProfileDraftKey(packageName, "state"))
+                        .apply()
+                    showPage(PAGE_STUDIO)
+                }
+                .setNegativeButton("CANCEL", null)
+                .show()
+        }, marginTop(8))
+
+        if (selectedApp == null) {
+            profileCard.addView(
+                text("Select apps in Sources, then choose one here to create its profile.", 11, COLOR_MUTED),
+                marginTop(12),
+            )
+            pageContent.addView(profileCard, marginTop(12))
+            return
+        }
+
+        val storedProfile = AppPresenceProfileStore.get(this, selectedPackage)
+        val defaultDetails = PresenceRules.defaultAppDetails(selectedPackage, selectedApp.label)
+        val labelField = textField(
+            "Activity label",
+            appProfileDraftKey(selectedPackage, "label"),
+            storedProfile?.activityLabel ?: selectedApp.label.take(40),
+            40,
+        )
+        val detailsField = textField(
+            "Details",
+            appProfileDraftKey(selectedPackage, "details"),
+            storedProfile?.details ?: defaultDetails,
+            120,
+        )
+        val stateField = textField(
+            "State (optional)",
+            appProfileDraftKey(selectedPackage, "state"),
+            storedProfile?.state.orEmpty(),
+            120,
+        )
+
+        profileCard.addView(text("ACTIVITY LABEL", 10, COLOR_MUTED, true, mono = true), marginTop(14))
+        profileCard.addView(labelField, marginTop(6))
+        profileCard.addView(text("DETAILS", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        profileCard.addView(detailsField, marginTop(6))
+        profileCard.addView(text("STATE · OPTIONAL", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        profileCard.addView(stateField, marginTop(6))
+        profileCard.addView(
+            actionButton("SAVE APP PROFILE", true) {
+                val activityLabel = labelField.text.toString().trim()
+                val details = detailsField.text.toString().trim()
+                if (activityLabel.isBlank() || details.isBlank()) {
+                    Toast.makeText(this, "Activity label and details are required", Toast.LENGTH_SHORT).show()
+                    return@actionButton
+                }
+                val saved = AppPresenceProfileStore.save(
+                    this,
+                    selectedPackage,
+                    AppPresenceProfile(activityLabel, details, stateField.text.toString()),
+                )
+                if (!saved) {
+                    Toast.makeText(this, "Could not save this app profile", Toast.LENGTH_LONG).show()
+                    return@actionButton
+                }
+                startServiceAction(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                Toast.makeText(this, "Profile saved for ${selectedApp.label}", Toast.LENGTH_SHORT).show()
+                showPage(PAGE_STUDIO)
+            },
+            marginTop(16),
+        )
+        profileCard.addView(
+            actionButton("RESET APP PROFILE", false) {
+                AppPresenceProfileStore.remove(this, selectedPackage)
+                settings.edit()
+                    .remove(appProfileDraftKey(selectedPackage, "label"))
+                    .remove(appProfileDraftKey(selectedPackage, "details"))
+                    .remove(appProfileDraftKey(selectedPackage, "state"))
+                    .apply()
+                startServiceAction(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                Toast.makeText(this, "Default profile restored for ${selectedApp.label}", Toast.LENGTH_SHORT).show()
+                showPage(PAGE_STUDIO)
+            },
+            marginTop(8),
+        )
+        profileCard.addView(
+            text(
+                if (storedProfile == null) "No custom profile saved · automatic defaults are active." else "Custom profile saved · this app's next detection will use these values.",
+                10,
+                COLOR_MUTED,
+            ),
+            marginTop(10),
+        )
+        pageContent.addView(profileCard, marginTop(12))
+    }
+
+    private fun appProfileDraftKey(packageName: String, field: String): String =
+        "studio_app_profile_${packageName}_$field"
 
     private fun buildAutomation() {
         pageContent.addView(sectionTitle("AUTOMATION", "Source arbitration and global behavior"))
@@ -594,6 +768,45 @@ class MainActivity : Activity() {
         events.addView(developerEventLog, marginTop(8))
         events.addView(actionButton("COPY DIAGNOSTICS + EVENT LOG", false) { copyDiagnostics() }, marginTop(10))
         pageContent.addView(events, marginTop(12))
+
+        val crashCard = card()
+        crashCard.addView(text("CRASH / NATIVE EXIT DIAGNOSTICS", 10, COLOR_ACCENT, true, mono = true))
+        developerCrashStatus = text(CrashDiagnostics.summary(this), 10, COLOR_TEXT, mono = true)
+        crashCard.addView(developerCrashStatus, marginTop(8))
+        crashCard.addView(actionButton("COPY LATEST CRASH REPORT", false) {
+            val report = CrashDiagnostics.latestReportText(this)
+            if (report.isNullOrBlank()) {
+                Toast.makeText(this, "No crash report recorded", Toast.LENGTH_SHORT).show()
+            } else {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Gecko Presence crash report", report))
+                Toast.makeText(this, "Crash report copied", Toast.LENGTH_SHORT).show()
+            }
+        }, marginTop(10))
+        crashCard.addView(actionButton("SHARE LATEST CRASH REPORT", false) {
+            val report = CrashDiagnostics.latestReportText(this)
+            if (report.isNullOrBlank()) {
+                Toast.makeText(this, "No crash report recorded", Toast.LENGTH_SHORT).show()
+            } else {
+                val share = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Gecko Presence crash report")
+                    .putExtra(Intent.EXTRA_TEXT, report)
+                startActivity(Intent.createChooser(share, "Share crash report"))
+            }
+        }, marginTop(8))
+        crashCard.addView(actionButton("EXPORT CRASH BUNDLE (TXT + TOMBSTONE)", false) {
+            if (CrashDiagnostics.exportableFileCount(this) == 0) {
+                Toast.makeText(this, "No crash files are available to export", Toast.LENGTH_SHORT).show()
+            } else {
+                val create = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("application/zip")
+                    .putExtra(Intent.EXTRA_TITLE, "GeckoPresence-Crash-Diagnostics.zip")
+                startActivityForResult(create, REQUEST_EXPORT_CRASH_BUNDLE)
+            }
+        }, marginTop(8))
+        pageContent.addView(crashCard, marginTop(12))
         renderDeveloperStatus()
     }
 
@@ -805,6 +1018,9 @@ class MainActivity : Activity() {
             "browserAccessibility=${accessibilityServiceStatus()}",
             "sdkConfigured=${BuildConfig.DISCORD_SDK_ENABLED}",
             "applicationId=${BuildConfig.DISCORD_APP_ID}",
+            "lastCheckpoint=${CrashDiagnostics.checkpointSummary(this)}",
+            "crashSummary=${CrashDiagnostics.summary(this)}",
+            "latestCrashReport=${CrashDiagnostics.latestReportText(this).orEmpty()}",
             "eventLog=${runtime.getString(PresenceEngineService.KEY_EVENT_LOG, "").orEmpty()}",
         ).joinToString("\n")
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -837,6 +1053,7 @@ class MainActivity : Activity() {
             developerActivity.text = intent?.getStringExtra(PresenceEngineService.EXTRA_PRESENCE_PREVIEW)
                 ?: runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source").orEmpty()
             developerEventLog.text = runtime.getString(PresenceEngineService.KEY_EVENT_LOG, "No events recorded").orEmpty().ifBlank { "No events recorded" }
+            if (::developerCrashStatus.isInitialized) developerCrashStatus.text = CrashDiagnostics.summary(this)
         }
     }
 
@@ -956,7 +1173,9 @@ class MainActivity : Activity() {
         private const val KEY_STUDIO_DRAFT_NAME = "studio_draft_name"
         private const val KEY_STUDIO_DRAFT_DETAILS = "studio_draft_details"
         private const val KEY_STUDIO_DRAFT_STATE = "studio_draft_state"
+        private const val KEY_STUDIO_PROFILE_PACKAGE = "studio_app_profile_package"
         private const val REQUEST_NOTIFICATIONS = 4401
+        private const val REQUEST_EXPORT_CRASH_BUNDLE = 4402
         private const val TAG = "GeckoPresenceUI"
 
     }

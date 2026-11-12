@@ -1,5 +1,8 @@
 package app.geckopresence.host.core
 
+import app.geckopresence.host.core.AppPresenceProfile
+import app.geckopresence.host.core.AppPresenceProfilePolicy
+
 fun main() {
     check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.START") == RpcCommand.NONE)
     check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.UPDATE_APP_TRACKING") == RpcCommand.NONE)
@@ -17,6 +20,32 @@ fun main() {
     check(PresenceActivityMapper.detailsLine("x".repeat(40), "y".repeat(120))?.length == 128)
     check(PresenceActivityMapper.stateLine(" Paused ") == "Paused")
     check(PresenceActivityMapper.stateLine("  ") == null)
+    val defaultAppProfile = AppPresenceProfilePolicy.resolve(
+        appLabel = "YouTube",
+        defaultDetails = "Watching",
+        custom = null,
+    )
+    check(defaultAppProfile == AppPresenceProfile("YouTube", "Watching", null))
+    val customAppProfile = AppPresenceProfilePolicy.resolve(
+        appLabel = "YouTube",
+        defaultDetails = "Watching",
+        custom = AppPresenceProfile("  YouTube Music  ", "  Listening to albums  ", "  Focus mode  "),
+    )
+    check(customAppProfile == AppPresenceProfile("YouTube Music", "Listening to albums", "Focus mode"))
+    val partialAppProfile = AppPresenceProfilePolicy.resolve(
+        appLabel = "Spotify",
+        defaultDetails = "Listening to music",
+        custom = AppPresenceProfile("  ", "  ", "  "),
+    )
+    check(partialAppProfile == AppPresenceProfile("Spotify", "Listening to music", null))
+    val boundedAppProfile = AppPresenceProfilePolicy.resolve(
+        appLabel = "A".repeat(100),
+        defaultDetails = "D".repeat(180),
+        custom = AppPresenceProfile("N".repeat(90), "X".repeat(150), "S".repeat(150)),
+    )
+    check(boundedAppProfile.activityLabel.codePointCount(0, boundedAppProfile.activityLabel.length) == 40)
+    check(boundedAppProfile.details.length == 120)
+    check(boundedAppProfile.state?.length == 120)
     val unicodeBounded = PresenceRules.cleanText("A".repeat(127) + "😀X", 128)!!
     check(unicodeBounded.codePointCount(0, unicodeBounded.length) == 128)
     check(!unicodeBounded.last().isHighSurrogate())
@@ -79,5 +108,5 @@ fun main() {
     check(PresenceSourceArbiter.winner(mapOf("web" to expiring), 999L) != null)
     check(PresenceSourceArbiter.winner(mapOf("web" to expiring), 1_000L) == null)
     check(PresenceSourceArbiter.winner(mapOf("web" to browserCandidate), 99_999L) != null)
-    println("PresenceRulesSelfTest: 68 checks passed")
+    println("PresenceRulesSelfTest: core policy checks passed")
 }

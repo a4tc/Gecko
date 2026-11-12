@@ -2,6 +2,7 @@ package app.geckopresence.host
 
 import android.content.Context
 import app.geckopresence.host.core.AppActivityRules
+import app.geckopresence.host.core.AppPresenceProfilePolicy
 import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceUpdate
 
@@ -21,14 +22,17 @@ object AppPresencePolicy {
             .getOrDefault(packageName)
         if (!AppActivityRules.isSelectableApp(packageName, label, context.packageName)) return null
 
-        val name = PresenceRules.cleanText(label, 80) ?: "Android app"
-        val details = PresenceRules.defaultAppDetails(packageName, label)
+        val profile = AppPresenceProfilePolicy.resolve(
+            appLabel = label,
+            defaultDetails = PresenceRules.defaultAppDetails(packageName, label),
+            custom = AppPresenceProfileStore.get(context, packageName),
+        )
 
         return PresenceUpdate(
             source = SOURCE,
-            name = name,
-            details = details,
-            state = null,
+            name = profile.activityLabel,
+            details = profile.details,
+            state = profile.state,
             mediaState = "browsing",
             startTimestampSeconds = System.currentTimeMillis() / 1000L,
             sourceType = "android-app",

@@ -101,7 +101,7 @@ jobs:
           gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
           test -s app/build/outputs/apk/debug/app-debug.apk
           mkdir -p ../dist
-          cp app/build/outputs/apk/debug/app-debug.apk ../dist/GeckoPresence-0.6.0-Android-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../dist/GeckoPresence-0.6.1-Android-debug.apk
 
       - name: Generate build manifest and checksums
         shell: bash
@@ -115,7 +115,7 @@ jobs:
           cat > dist/BUILD-MANIFEST.json <<JSON
           {
             "product": "Gecko Presence",
-            "version": "0.6.0",
+            "version": "0.6.1",
             "androidMode": "$SDK_MODE",
             "runtime": "native-android",
             "browserDetection": "optional-accessibility-address-field",
@@ -123,15 +123,15 @@ jobs:
           }
           JSON
           cd dist
-          sha256sum GeckoPresence-0.6.0-Android-debug.apk BUILD-MANIFEST.json > GeckoPresence-0.6.0-SHA256SUMS.txt
+          sha256sum GeckoPresence-0.6.1-Android-debug.apk BUILD-MANIFEST.json > GeckoPresence-0.6.1-SHA256SUMS.txt
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: GeckoPresence-0.6.0-Android
+          name: GeckoPresence-0.6.1-Android
           path: |
-            dist/GeckoPresence-0.6.0-Android-debug.apk
+            dist/GeckoPresence-0.6.1-Android-debug.apk
             dist/BUILD-MANIFEST.json
-            dist/GeckoPresence-0.6.0-SHA256SUMS.txt
+            dist/GeckoPresence-0.6.1-SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
