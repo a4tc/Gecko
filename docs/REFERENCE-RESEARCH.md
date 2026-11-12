@@ -42,3 +42,32 @@ References:
 - https://discord.com/developers/docs/social-sdk/overview
 - https://discord.com/developers/docs/social-sdk/getting-started
 - https://github.com/discord/discord-social-sdk
+
+## Android Rich Presence references (research only)
+
+Research performed on 2026-11-12. These projects were inspected for product behavior and architecture ideas; their transports and implementation code were not imported into Gecko.
+
+| Project | Observed status | Useful reference | Gecko decision |
+|---|---|---|---|
+| [dead8309/Kizzy](https://github.com/dead8309/Kizzy) | Original Kotlin/Jetpack Compose app; its README documents Android 8.1–14 and a Discord Gateway/user-token warning. | Selected-package detection, profile settings, reusable presets, placeholders, media session handling. | Reuse the product concept of package-specific profiles, but retain Gecko's UsageEvents tracker and official Social SDK transport. |
+| [milliarderr/Kizzy-Enhanced](https://github.com/milliarderr/Kizzy-Enhanced) | GitHub marks this fork archived. | Reconnect backoff, error isolation around detection loops, shorter detection interval, app-specific custom placeholders. | Treat as resilience inspiration only; don't import its Gateway/token logic or use it as a maintained base. |
+| [sudoloser/Axe](https://github.com/sudoloser/Axe) | Public fork; latest commit returned by GitHub search was 2026-08-06. | Per-app RPC configurations; optional remote gateway proxy. | Adopt package-keyed local profile UX; reject remote token relay as outside Gecko's privacy and transport contract. |
+| [UnpackedX/Kizzey](https://codeberg.org/UnpackedX/Kizzey) | Codeberg history shows 8.4.5 stable on 2026-11-02. | Dedicated crash-file logger, previous-crash surfacing, source ownership/arbitration guidance, service-lifecycle checks. | Implement a clean local crash reporter and keep one Gecko-owned candidate arbiter. No Kizzey source file was copied. |
+
+### Clean-room and transport boundaries
+
+- Kizzy's README identifies GPL-3.0, but inspected source files also contain explicit author notices restricting copying/distribution without express permission. Gecko therefore uses observed behavior and architecture concepts, not source-code transplantation.
+- Kizzey's `CrashFileLogger.kt` and RPC service files have the same explicit source-header restriction. Gecko's `CrashDiagnostics.kt` is a separate implementation using Android's `ApplicationExitInfo`, private app storage, and system document-picker export.
+- Kizzy, Kizzy Enhanced, Axe, and Kizzey describe Discord Gateway-based account-token flows. Gecko does not adopt those flows. Gecko keeps the official Discord Social SDK AAR and Android unauthenticated Direct RPC transport.
+- Kizzey's `docs/FRAGILE-RPC.md` stresses tracing the entire publish/clear path and testing the visible result on a real phone and Discord client. Gecko's existing single `PresenceEngineService` and `PresenceSourceArbiter` remain the only source-to-RPC path; real-device verification remains mandatory.
+
+### Source links
+
+- Kizzy: https://github.com/dead8309/Kizzy
+- Kizzy app-detection source: https://github.com/dead8309/Kizzy/blob/master/feature_rpc_base/src/main/java/com/my/kizzy/feature_rpc_base/services/AppDetectionService.kt
+- Kizzy package preference model: https://github.com/dead8309/Kizzy/blob/master/common/preference/src/main/java/com/my/kizzy/preference/Prefs.kt
+- Kizzy Enhanced: https://github.com/milliarderr/Kizzy-Enhanced
+- Axe: https://github.com/sudoloser/Axe
+- Kizzey: https://codeberg.org/UnpackedX/Kizzey
+- Kizzey crash logger: https://codeberg.org/UnpackedX/Kizzey/src/branch/main/feature_crash_handler/src/main/java/com/my/kizzy/feature_crash_handler/CrashFileLogger.kt
+- Kizzey RPC fragility notes: https://codeberg.org/UnpackedX/Kizzey/src/branch/main/docs/FRAGILE-RPC.md
