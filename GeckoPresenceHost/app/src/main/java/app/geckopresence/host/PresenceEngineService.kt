@@ -15,8 +15,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.IBinder
+import android.util.Log
 import app.geckopresence.host.core.PresenceSourceArbiter
 import app.geckopresence.host.core.PresenceUpdate
+import app.geckopresence.host.core.RpcCommand
+import app.geckopresence.host.core.RpcStartupPolicy
 
 /** Owns native source lifecycles, candidate arbitration, and Discord Direct RPC publishing. */
 class PresenceEngineService : Service() {
@@ -34,17 +37,25 @@ class PresenceEngineService : Service() {
     private var usageAppTracker: UsageAppTracker? = null
     private var mediaSessionTracker: MediaSessionPresenceTracker? = null
     private var receiverRegistered = false
+    private var firstStartCommand = true
 
     private val sourceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                ACTION_BROWSER_PRESENCE -> receiveBrowserPresence(intent)
-                ACTION_BROWSER_CLEAR -> {
-                    if (intent.getStringExtra(EXTRA_SOURCE_TYPE) == SOURCE_WEBSITE) {
-                        clearSourceType(SOURCE_WEBSITE)
+            try {
+                when (intent?.action) {
+                    ACTION_BROWSER_PRESENCE -> receiveBrowserPresence(intent)
+                    ACTION_BROWSER_CLEAR -> {
+                        if (intent.getStringExtra(EXTRA_SOURCE_TYPE) == SOURCE_WEBSITE) {
+                            clearSourceType(SOURCE_WEBSITE)
+                        }
                     }
+                    ACTION_REFRESH_MEDIA -> updateMediaTracking()
                 }
-                ACTION_REFRESH_MEDIA -> updateMediaTracking()
+            } catch (exception: Exception) {
+                Log.e(TAG, "Source broadcast failed", exception)
+                lastStatusMessage = "A source event failed: ${exception.javaClass.simpleName}"
+                recordEvent("Source event failed: ${exception.javaClass.simpleName}")
+                publishStatus(lastStatusMessage)
             }
         }
     }
@@ -68,53 +79,146 @@ class PresenceEngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         engineState = STATE_STARTING
-        createNotificationChannel()
-        startPresenceNotification("Starting native presence engine")
-        registerSourceReceiver()
-        DiscordSdk.setStatusListener(::handleSdkStatus)
+        try {
+            createNotificationChannel()
+            startPresenceNotification("Starting native presence engine")
+            registerSourceReceiver()
+            DiscordSdk.setStatusListener(::handleSdkStatus)
 
-        if (BuildConfig.DISCORD_SDK_ENABLED && BuildConfig.DISCORD_APP_ID > 0L) {
-            if (DiscordSdk.initialize(BuildConfig.DISCORD_APP_ID)) {
-                sdkState = SDK_INITIALIZED
-                lastStatusMessage = "Discord Direct RPC initialized"
+            // Starting the source engine must never load or initialize the native Discord SDK.
+            sdkState = if (BuildConfig.DISCORD_SDK_ENABLED && BuildConfig.DISCORD_APP_ID > 0L) {
+                SDK_NOT_INITIALIZED
             } else {
-                sdkState = SDK_ERROR
-                lastStatusMessage = "Discord Social SDK could not be initialized"
+                SDK_MISSING
             }
-        } else {
-            sdkState = SDK_MISSING
-            lastStatusMessage = "Official Discord SDK AAR or Application ID is missing"
+            engineState = STATE_RUNNING
+            lastStatusMessage = if (sdkState == SDK_MISSING) {
+                "Local engine ready. Discord SDK is not configured."
+            } else {
+                "Local engine ready. Discord RPC is disconnected; connect it from Developer."
+            }
+            restoreManualPresence()
+            updateAppTracking()
+            updateMediaTracking()
+            mainHandler.removeCallbacks(expiryTask)
+            mainHandler.post(expiryTask)
+            recordEvent("Local source engine started; native RPC remains disconnected")
+            publishStatus(lastStatusMessage)
+            updateNotification("Native presence engine running · RPC disconnected")
+        } catch (exception: Exception) {
+            engineState = STATE_ERROR
+            lastStatusMessage = "Engine start failed: ${exception.javaClass.simpleName}"
+            Log.e(TAG, "Presence engine startup failed", exception)
+            recordEvent(lastStatusMessage)
+            publishStatus(lastStatusMessage)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
-
-        engineState = STATE_RUNNING
-        restoreManualPresence()
-        updateAppTracking()
-        updateMediaTracking()
-        mainHandler.post(expiryTask)
-        publishStatus(lastStatusMessage)
-        updateNotification("Native presence engine running")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> {
-                engineState = STATE_RUNNING
-                updateAppTracking()
-                updateMediaTracking()
+        val action = intent?.action
+        if (firstStartCommand) {
+            firstStartCommand = false
+            if (action == null || action == ACTION_START || action == ACTION_UPDATE_APP_TRACKING ||
+                action == ACTION_UPDATE_MEDIA_TRACKING || action == ACTION_REFRESH_MEDIA) {
                 publishStatus()
-            }
-            ACTION_UPDATE_APP_TRACKING -> updateAppTracking()
-            ACTION_UPDATE_MEDIA_TRACKING, ACTION_REFRESH_MEDIA -> updateMediaTracking()
-            ACTION_APPLY_MANUAL -> applyManualPresence()
-            ACTION_CLEAR_MANUAL -> clearManualPresence()
-            ACTION_STOP -> {
-                stopSelf()
-                return START_NOT_STICKY
+                return START_STICKY
             }
         }
+        if (action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        try {
+            when (RpcStartupPolicy.commandFor(action)) {
+                RpcCommand.CONNECT -> connectDiscordSdk()
+                RpcCommand.DISCONNECT -> disconnectDiscordSdk()
+                RpcCommand.NONE -> when (action) {
+                    null, ACTION_START -> {
+                        engineState = STATE_RUNNING
+                        updateAppTracking()
+                        updateMediaTracking()
+                        publishStatus()
+                    }
+                    ACTION_UPDATE_APP_TRACKING -> updateAppTracking()
+                    ACTION_UPDATE_MEDIA_TRACKING, ACTION_REFRESH_MEDIA -> updateMediaTracking()
+                    ACTION_APPLY_MANUAL -> applyManualPresence()
+                    ACTION_CLEAR_MANUAL -> clearManualPresence()
+                }
+            }
+        } catch (exception: Exception) {
+            lastStatusMessage = "Engine action failed: ${exception.javaClass.simpleName}"
+            Log.e(TAG, "Engine action failed: $action", exception)
+            recordEvent("Action failed (${action ?: "restart"}): ${exception.javaClass.simpleName}")
+            publishStatus(lastStatusMessage)
+        }
         return START_STICKY
+    }
+
+    private fun connectDiscordSdk() {
+        if (!BuildConfig.DISCORD_SDK_ENABLED || BuildConfig.DISCORD_APP_ID <= 0L) {
+            sdkState = SDK_MISSING
+            lastStatusMessage = "Discord SDK AAR or Application ID is not configured"
+            recordEvent("Discord RPC connect skipped: SDK not configured")
+            publishStatus(lastStatusMessage)
+            return
+        }
+        if (DiscordSdk.isInitialized) {
+            sdkState = SDK_INITIALIZED
+            lastStatusMessage = "Discord Direct RPC is already initialized"
+            publishStatus(lastStatusMessage)
+            return
+        }
+
+        sdkState = SDK_CONNECTING
+        lastStatusMessage = "Initializing Discord Direct RPC"
+        recordEvent("Discord RPC initialization requested by user")
+        publishStatus(lastStatusMessage)
+        try {
+            if (DiscordSdk.initialize(BuildConfig.DISCORD_APP_ID)) {
+                sdkState = SDK_INITIALIZED
+                lastStatusMessage = "Discord Direct RPC initialized"
+                currentWinner()?.let(DiscordSdk::setPresence)
+                recordEvent("Discord Direct RPC initialized")
+                updateNotification("Discord Direct RPC initialized")
+            } else {
+                sdkState = SDK_ERROR
+                lastStatusMessage = "Discord Social SDK initialization failed; inspect diagnostics"
+                recordEvent("Discord Direct RPC initialization returned false")
+            }
+        } catch (error: LinkageError) {
+            sdkState = SDK_ERROR
+            lastStatusMessage = "Native Discord library could not be loaded: ${error.javaClass.simpleName}"
+            Log.e(TAG, "Discord native library linkage failed", error)
+            recordEvent("Discord RPC linkage failed: ${error.javaClass.simpleName}")
+        } catch (exception: Exception) {
+            sdkState = SDK_ERROR
+            lastStatusMessage = "Discord RPC initialization failed: ${exception.javaClass.simpleName}"
+            Log.e(TAG, "Discord RPC initialization failed", exception)
+            recordEvent("Discord RPC initialization failed: ${exception.javaClass.simpleName}")
+        }
+        publishStatus(lastStatusMessage)
+    }
+
+    private fun disconnectDiscordSdk() {
+        runCatching { DiscordSdk.clearPresence() }
+        runCatching { DiscordSdk.destroy() }
+        sdkState = if (BuildConfig.DISCORD_SDK_ENABLED) SDK_NOT_INITIALIZED else SDK_MISSING
+        lastStatusMessage = "Discord Direct RPC disconnected; local sources remain available"
+        recordEvent("Discord Direct RPC disconnected")
+        publishStatus(lastStatusMessage)
+        updateNotification("Native presence engine running · RPC disconnected")
+    }
+
+    private fun recordEvent(message: String) {
+        val preferences = getSharedPreferences(PREFS_RUNTIME, MODE_PRIVATE)
+        val existing = preferences.getString(KEY_EVENT_LOG, "").orEmpty()
+        val next = (existing.split('\n').filter { it.isNotBlank() } +
+            "${System.currentTimeMillis()} $message").takeLast(MAX_EVENT_LOG_LINES)
+        preferences.edit().putString(KEY_EVENT_LOG, next.joinToString("\n")).apply()
     }
 
     private fun registerSourceReceiver() {
@@ -274,6 +378,7 @@ class PresenceEngineService : Service() {
             "initialized", "ready" -> {
                 sdkState = SDK_INITIALIZED
                 lastStatusMessage = error ?: "Discord Direct RPC initialized"
+                recordEvent("Discord SDK status: $status")
                 latestPresence?.let(DiscordSdk::setPresence)
                 updateNotification("Discord Direct RPC ready")
             }
@@ -289,6 +394,7 @@ class PresenceEngineService : Service() {
             "error", "sdk_error" -> {
                 sdkState = SDK_ERROR
                 lastStatusMessage = error ?: "Discord Social SDK error"
+                recordEvent("Discord SDK error: ${lastStatusMessage.take(120)}")
                 updateNotification("Discord SDK needs attention")
             }
             else -> {
@@ -450,6 +556,8 @@ class PresenceEngineService : Service() {
         const val ACTION_BROWSER_PRESENCE = "app.geckopresence.host.action.BROWSER_PRESENCE"
         const val ACTION_BROWSER_CLEAR = "app.geckopresence.host.action.BROWSER_CLEAR"
         const val ACTION_STOP = "app.geckopresence.host.action.STOP"
+        const val ACTION_CONNECT_DISCORD = RpcStartupPolicy.ACTION_CONNECT_DISCORD
+        const val ACTION_DISCONNECT_DISCORD = RpcStartupPolicy.ACTION_DISCONNECT_DISCORD
         const val ACTION_STATUS_CHANGED = "app.geckopresence.host.action.STATUS_CHANGED"
 
         const val EXTRA_ENGINE_STATE = "engine_state"
@@ -477,6 +585,7 @@ class PresenceEngineService : Service() {
         const val KEY_PRESENCE_PREVIEW = "presence_preview"
         const val KEY_APP_TRACKER_STATUS = "app_tracker_status"
         const val KEY_MEDIA_TRACKER_STATUS = "media_tracker_status"
+        const val KEY_EVENT_LOG = "event_log"
         const val KEY_TRACK_MEDIA_SESSIONS = "track_media_sessions"
         const val KEY_AUTO_SOURCES_ENABLED = "auto_sources_enabled"
         const val KEY_MANUAL_ACTIVE = "manual_presence_active"
@@ -488,6 +597,8 @@ class PresenceEngineService : Service() {
         const val STATE_STARTING = "STARTING"
         const val STATE_RUNNING = "RUNNING"
         const val STATE_STOPPED = "STOPPED"
+        const val STATE_ERROR = "ERROR"
+        const val SDK_CONNECTING = "SDK_CONNECTING"
         const val SDK_INITIALIZED = "SDK_INITIALIZED"
         const val SDK_MISSING = "SDK_MISSING"
         const val SDK_ERROR = "SDK_ERROR"
@@ -501,5 +612,7 @@ class PresenceEngineService : Service() {
         private const val EXPIRY_SWEEP_INTERVAL_MS = 10_000L
         private const val NOTIFICATION_CHANNEL_ID = "gpb_presence_engine"
         private const val NOTIFICATION_ID = 32145
+        private const val MAX_EVENT_LOG_LINES = 40
+        private const val TAG = "GeckoPresenceEngine"
     }
 }

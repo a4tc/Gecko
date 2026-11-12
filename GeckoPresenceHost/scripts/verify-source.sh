@@ -71,6 +71,18 @@ if "ACTION_EXTERNAL_" in service_kt or "receiveExternalPresence" in service_kt:
     raise SystemExit("Browser source actions still use obsolete external-bridge naming")
 if "ACTION_BROWSER_PRESENCE" not in service_kt or "ACTION_BROWSER_CLEAR" not in service_kt:
     raise SystemExit("Native browser source actions are missing")
+service_on_create = re.search(r"override fun onCreate\(\).*?\n    }", service_kt, re.S)
+if service_on_create is None or "DiscordSdk.initialize" in service_on_create.group(0):
+    raise SystemExit("Local engine startup must not initialize the native Discord SDK")
+if service_kt.count("DiscordSdk.initialize(") != 1 or "RpcStartupPolicy.commandFor(action)" not in service_kt:
+    raise SystemExit("Discord SDK initialization must be reachable only through explicit RPC commands")
+rpc_policy = (app / "src/main/java/app/geckopresence/host/core/RpcStartupPolicy.kt").read_text()
+if "ACTION_CONNECT_DISCORD" not in rpc_policy or "ACTION_DISCONNECT_DISCORD" not in rpc_policy:
+    raise SystemExit("Explicit Developer Console RPC actions are missing")
+notification_listener = (app / "src/main/java/app/geckopresence/host/PresenceNotificationListener.kt").read_text()
+browser_service = (app / "src/main/java/app/geckopresence/host/BrowserAccessibilityService.kt").read_text()
+if "INTERNAL_BROADCAST_PERMISSION" not in browser_service or "INTERNAL_BROADCAST_PERMISSION" not in notification_listener:
+    raise SystemExit("Protected internal broadcasts must include the signature permission")
 browser_service = (app / "src/main/java/app/geckopresence/host/BrowserAccessibilityService.kt").read_text()
 browser_xml = (app / "src/main/res/xml/browser_accessibility_service.xml").read_text()
 if "TYPE_VIEW_TEXT_CHANGED" not in browser_service or "typeViewTextChanged" not in browser_xml:
@@ -86,6 +98,11 @@ if action_button is None or "minHeight = dp(48)" not in action_button.group(1):
     raise SystemExit("Primary action buttons must meet 48dp touch-target height")
 if "LinearLayout.LayoutParams(dp(84), dp(48))" not in activity_ui:
     raise SystemExit("Priority action controls must meet 48dp touch-target height")
+for token in ("PAGE_DEVELOPER", "PAGE_MORE", "buildDeveloper()", "DEVELOPER CONSOLE", "CONNECT DISCORD RPC", "ENGINE EVENT LOG"):
+    if token not in activity_ui:
+        raise SystemExit(f"Native navigation / Developer Console is missing: {token}")
+if "isFillViewport = true" not in activity_ui or "setSingleLine(true)" not in activity_ui:
+    raise SystemExit("Android widget compatibility properties are missing")
 
 if "DISCORD_APP_ID=1569772369344602173" not in props:
     raise SystemExit("Known Discord Application ID default is missing")

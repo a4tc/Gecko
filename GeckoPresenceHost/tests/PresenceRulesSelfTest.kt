@@ -1,6 +1,16 @@
 package app.geckopresence.host.core
 
 fun main() {
+    check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.START") == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.UPDATE_APP_TRACKING") == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.UPDATE_MEDIA_TRACKING") == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor(RpcStartupPolicy.ACTION_CONNECT_DISCORD) == RpcCommand.CONNECT)
+    check(RpcStartupPolicy.commandFor(RpcStartupPolicy.ACTION_DISCONNECT_DISCORD) == RpcCommand.DISCONNECT)
+    check(RpcStartupPolicy.commandFor(null) == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.APPLY_MANUAL") == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.CLEAR_MANUAL") == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor("app.geckopresence.host.action.REFRESH_MEDIA") == RpcCommand.NONE)
+    check(RpcStartupPolicy.commandFor("unknown-action") == RpcCommand.NONE)
     check(PresenceActivityMapper.detailsLine("YouTube", "Never Gonna Give You Up") == "YouTube · Never Gonna Give You Up")
     check(PresenceActivityMapper.detailsLine("github.com", "Browsing") == "github.com · Browsing")
     check(PresenceActivityMapper.detailsLine(null, "Custom activity") == "Custom activity")
@@ -69,5 +79,5 @@ fun main() {
     check(PresenceSourceArbiter.winner(mapOf("web" to expiring), 999L) != null)
     check(PresenceSourceArbiter.winner(mapOf("web" to expiring), 1_000L) == null)
     check(PresenceSourceArbiter.winner(mapOf("web" to browserCandidate), 99_999L) != null)
-    println("PresenceRulesSelfTest: 58 checks passed")
+    println("PresenceRulesSelfTest: 68 checks passed")
 }

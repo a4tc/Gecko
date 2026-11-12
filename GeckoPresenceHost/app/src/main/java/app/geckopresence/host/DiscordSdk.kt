@@ -33,7 +33,8 @@ object DiscordSdk {
             val success = nativeInit(applicationId)
             initialized.set(success)
             success
-        } catch (_: UnsatisfiedLinkError) {
+        } catch (_: LinkageError) {
+            initialized.set(false)
             false
         } catch (_: Exception) {
             false

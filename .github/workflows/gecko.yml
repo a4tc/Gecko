@@ -70,32 +70,27 @@ jobs:
         working-directory: GeckoPresenceHost
         run: sh scripts/verify-source.sh
 
-      - name: Download and verify Discord Social SDK AAR
+      - name: Download and verify Discord Partner SDK
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
-          AAR_DIR="$GITHUB_WORKSPACE/GeckoPresenceHost/app/libs"
-          AAR="$AAR_DIR/discord_partner_sdk.aar"
-
-          mkdir -p "$AAR_DIR"
-
+          SDK_DIR="$RUNNER_TEMP/gecko-sdk"
+          AAR_TARGET="$GITHUB_WORKSPACE/GeckoPresenceHost/app/libs/discord_partner_sdk.aar"
+          mkdir -p "$SDK_DIR" "$(dirname "$AAR_TARGET")"
           gh release download sdk-1.10.19337 \
             --repo "$GITHUB_REPOSITORY" \
             --pattern discord_partner_sdk.aar \
-            --dir "$AAR_DIR"
-
-          test -s "$AAR"
-
+            --dir "$SDK_DIR"
+          AAR_SOURCE="$SDK_DIR/discord_partner_sdk.aar"
+          test -s "$AAR_SOURCE"
           printf '%s  %s\n' \
             'b1b2491f1e1848c79fd6f1986d5aa1e0c8019e88a6e62c7be06b89e8e4870933' \
-            "$AAR" | sha256sum --check
-
-          unzip -t "$AAR" >/dev/null
-
-          echo "Discord Social SDK AAR downloaded and verified."
+            "$AAR_SOURCE" | sha256sum --check -
+          unzip -t "$AAR_SOURCE"
+          cp "$AAR_SOURCE" "$AAR_TARGET"
+          echo "Discord SDK AAR verified and staged."
 
       - name: Test and assemble APK
         working-directory: GeckoPresenceHost

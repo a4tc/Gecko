@@ -32,7 +32,11 @@ class MediaSessionPresenceTracker(
     private val pollTask = object : Runnable {
         override fun run() {
             if (!running) return
-            refresh()
+            try {
+                refresh()
+            } catch (exception: RuntimeException) {
+                report("Media session refresh failed · ${exception.javaClass.simpleName}")
+            }
             if (running) handler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }

@@ -97,6 +97,7 @@ class BrowserAccessibilityService : AccessibilityService() {
                 .putExtra(PresenceEngineService.EXTRA_SOURCE_TYPE, "website")
                 .putExtra(PresenceEngineService.EXTRA_PRIORITY, PresencePriorityPolicy.get(this, "website"))
                 .putExtra(PresenceEngineService.EXTRA_EXPIRES_AT, System.currentTimeMillis() + WEBSITE_CANDIDATE_TTL_MS),
+            PresenceEngineService.INTERNAL_BROADCAST_PERMISSION,
         )
     }
 
@@ -180,6 +181,7 @@ class BrowserAccessibilityService : AccessibilityService() {
             Intent(PresenceEngineService.ACTION_BROWSER_CLEAR)
                 .setPackage(packageName)
                 .putExtra(PresenceEngineService.EXTRA_SOURCE_TYPE, "website"),
+            PresenceEngineService.INTERNAL_BROADCAST_PERMISSION,
         )
     }
 

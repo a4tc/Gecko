@@ -13,6 +13,7 @@ OUT="${TMPDIR:-/tmp}/gecko-presence-core-tests.jar"
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceSourceArbiter.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/AppActivityRules.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/ForegroundEventReducer.kt" \
+  "$ROOT/app/src/main/java/app/geckopresence/host/core/RpcStartupPolicy.kt" \
   "$ROOT/tests/PresenceRulesSelfTest.kt" \
   -include-runtime -d "$OUT"
 "$JAVA" -jar "$OUT"

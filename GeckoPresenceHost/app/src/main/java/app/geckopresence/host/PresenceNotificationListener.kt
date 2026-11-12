@@ -7,11 +7,17 @@ import android.service.notification.NotificationListenerService
 class PresenceNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
-        sendBroadcast(Intent(PresenceEngineService.ACTION_REFRESH_MEDIA).setPackage(packageName))
+        sendBroadcast(
+            Intent(PresenceEngineService.ACTION_REFRESH_MEDIA).setPackage(packageName),
+            PresenceEngineService.INTERNAL_BROADCAST_PERMISSION,
+        )
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        sendBroadcast(Intent(PresenceEngineService.ACTION_REFRESH_MEDIA).setPackage(packageName))
+        sendBroadcast(
+            Intent(PresenceEngineService.ACTION_REFRESH_MEDIA).setPackage(packageName),
+            PresenceEngineService.INTERNAL_BROADCAST_PERMISSION,
+        )
     }
 }

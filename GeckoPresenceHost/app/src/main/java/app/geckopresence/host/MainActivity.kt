@@ -25,11 +25,12 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.WindowInsets
 import android.widget.Button
+import android.widget.CompoundButton
 import android.widget.EditText
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
+import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
 import app.geckopresence.host.core.PresenceRules
@@ -55,6 +56,11 @@ class MainActivity : Activity() {
     private lateinit var statusMessage: TextView
     private lateinit var appSourceStatus: TextView
     private lateinit var mediaSourceStatus: TextView
+    private lateinit var developerEngineStatus: TextView
+    private lateinit var developerRpcStatus: TextView
+    private lateinit var developerMessage: TextView
+    private lateinit var developerActivity: TextView
+    private lateinit var developerEventLog: TextView
     private var activePage = PAGE_DASHBOARD
     private var receiverRegistered = false
 
@@ -92,9 +98,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (activePage == PAGE_DASHBOARD || activePage == PAGE_SOURCES || activePage == PAGE_SETTINGS) {
-            showPage(activePage)
-        }
+        showPage(activePage)
     }
 
     override fun onStop() {
@@ -112,8 +116,7 @@ class MainActivity : Activity() {
             setOnApplyWindowInsetsListener { view, insets ->
                 val systemInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     val bars = insets.getInsets(
-                        WindowInsets.Type.systemBars() or
-                            WindowInsets.Type.displayCutout(),
+                        WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
                     )
                     intArrayOf(bars.left, bars.top, bars.right, bars.bottom)
                 } else {
@@ -137,35 +140,32 @@ class MainActivity : Activity() {
         }
 
         val header = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(14))
-        }
-        header.addView(text("GECKO PRESENCE", 11, COLOR_ACCENT, true, mono = true))
-        header.addView(text("SIGNAL DECK", 26, COLOR_TEXT, true).apply {
-            letterSpacing = -0.04f
-            setPadding(0, dp(3), 0, 0)
-        })
-        header.addView(text("NATIVE ANDROID ACTIVITY ENGINE", 10, COLOR_MUTED, true, mono = true))
-        root.addView(header)
-
-        val navScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            setBackgroundColor(COLOR_PANEL)
-        }
-        navContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(18), dp(13), dp(18), dp(13))
         }
-        navScroll.addView(navContainer)
-        root.addView(navScroll)
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(text("GECKO / PRESENCE", 10, COLOR_ACCENT, true, mono = true))
+        brand.addView(text("SIGNAL DECK", 19, COLOR_TEXT, true).apply {
+            letterSpacing = -0.035f
+            setPadding(0, dp(2), 0, 0)
+        })
+        header.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val version = text("ANDROID\n0.6.0", 9, COLOR_MUTED, true, mono = true).apply {
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        header.addView(version)
+        root.addView(header)
+        root.addView(divider())
 
         val bodyScroll = ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
         }
         pageContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(32))
+            setPadding(dp(18), dp(18), dp(18), dp(28))
         }
         bodyScroll.addView(pageContent)
         root.addView(bodyScroll, LinearLayout.LayoutParams(
@@ -173,32 +173,58 @@ class MainActivity : Activity() {
             0,
             1f,
         ))
+
+        navContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(COLOR_PANEL)
+            setPadding(dp(4), dp(5), dp(4), dp(5))
+        }
+        root.addView(divider())
+        root.addView(navContainer, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(64),
+        ))
         setContentView(root)
         buildNavigation()
     }
 
     private fun buildNavigation() {
         navContainer.removeAllViews()
-        PAGES.forEach { page ->
-            val tab = TextView(this).apply {
-                text = page.uppercase()
-                textSize = 10f
-                typeface = Typeface.MONOSPACE
-                setTextColor(if (page == activePage) COLOR_BACKGROUND else COLOR_TEXT_SECONDARY)
-                setPadding(dp(12), dp(11), dp(12), dp(11))
-                background = solid(if (page == activePage) COLOR_ACCENT else Color.TRANSPARENT)
+        val destinations = listOf(
+            "HOME" to PAGE_DASHBOARD,
+            "SOURCES" to PAGE_SOURCES,
+            "STUDIO" to PAGE_STUDIO,
+            "DEV" to PAGE_DEVELOPER,
+            "MORE" to PAGE_MORE,
+        )
+        val selectedDestination = when (activePage) {
+            PAGE_AUTOMATION, PAGE_LIBRARY, PAGE_SETTINGS -> PAGE_MORE
+            else -> activePage
+        }
+        destinations.forEach { (label, destination) ->
+            val selected = selectedDestination == destination
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                minHeight = dp(48)
-                setOnClickListener {
-                    activePage = page
-                    buildNavigation()
-                    showPage(page)
-                }
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(3), dp(3), dp(3), dp(3))
+                setBackgroundColor(if (selected) COLOR_BACKGROUND else Color.TRANSPARENT)
+                contentDescription = "Open $label"
+                setOnClickListener { showPage(destination) }
             }
-            navContainer.addView(tab, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { marginEnd = dp(6) })
+            item.addView(View(this).apply {
+                setBackgroundColor(if (selected) COLOR_ACCENT else Color.TRANSPARENT)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
+            item.addView(text(label, 9, if (selected) COLOR_ACCENT else COLOR_MUTED, true, mono = true).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(8), 0, dp(3))
+            })
+            navContainer.addView(item, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                marginStart = dp(2)
+                marginEnd = dp(2)
+            })
         }
     }
 
@@ -213,6 +239,8 @@ class MainActivity : Activity() {
             PAGE_AUTOMATION -> buildAutomation()
             PAGE_LIBRARY -> buildLibrary()
             PAGE_SETTINGS -> buildSettings()
+            PAGE_DEVELOPER -> buildDeveloper()
+            PAGE_MORE -> buildMore()
         }
     }
 
@@ -233,6 +261,9 @@ class MainActivity : Activity() {
             stopService(Intent(this, PresenceEngineService::class.java))
             Toast.makeText(this, "Presence engine stopped", Toast.LENGTH_SHORT).show()
             showPage(PAGE_DASHBOARD)
+        }, marginTop(8))
+        statusCard.addView(actionButton("OPEN DEVELOPER CONSOLE", false) {
+            showPage(PAGE_DEVELOPER)
         }, marginTop(8))
         pageContent.addView(statusCard)
 
@@ -302,9 +333,9 @@ class MainActivity : Activity() {
             } else {
                 sendBroadcast(Intent(PresenceEngineService.ACTION_BROWSER_CLEAR)
                     .setPackage(packageName)
-                    .putExtra(PresenceEngineService.EXTRA_SOURCE_TYPE, "website"))
+                    .putExtra(PresenceEngineService.EXTRA_SOURCE_TYPE, "website"), PresenceEngineService.INTERNAL_BROADCAST_PERMISSION)
             }
-            sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName))
+            sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName), PresenceEngineService.INTERNAL_BROADCAST_PERMISSION)
         }
         browserCard.addView(actionButton("SELECT SUPPORTED BROWSERS", false) { showBrowserPicker() }, marginTop(8))
         browserCard.addView(actionButton("OPEN ACCESSIBILITY SETTINGS", false) {
@@ -431,9 +462,9 @@ class MainActivity : Activity() {
             if (!enabled) {
                 sendBroadcast(Intent(PresenceEngineService.ACTION_BROWSER_CLEAR)
                     .setPackage(packageName)
-                    .putExtra(PresenceEngineService.EXTRA_SOURCE_TYPE, "website"))
+                    .putExtra(PresenceEngineService.EXTRA_SOURCE_TYPE, "website"), PresenceEngineService.INTERNAL_BROADCAST_PERMISSION)
             }
-            sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName))
+            sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName), PresenceEngineService.INTERNAL_BROADCAST_PERMISSION)
         }
         rules.addView(text("Manual override", 12, COLOR_TEXT, true), marginTop(12))
         rules.addView(text("Priority 100 · stays active until released", 11, COLOR_MUTED), marginTop(4))
@@ -515,6 +546,73 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun buildDeveloper() {
+        pageContent.addView(sectionTitle("DEVELOPER CONSOLE", "Direct RPC · source runtime · diagnostics"))
+
+        val runtimeCard = card()
+        runtimeCard.addView(text("RUNTIME STATE", 10, COLOR_ACCENT, true, mono = true))
+        developerEngineStatus = text("ENGINE / ${runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED").orEmpty()}", 12, COLOR_TEXT, true, mono = true)
+        developerRpcStatus = text("RPC / ${runtime.getString(PresenceEngineService.KEY_SDK_STATE, "SDK_NOT_INITIALIZED").orEmpty()}", 12, COLOR_TEXT, true, mono = true)
+        developerMessage = text(runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Engine has not been started.").orEmpty(), 11, COLOR_MUTED)
+        runtimeCard.addView(developerEngineStatus, marginTop(8))
+        runtimeCard.addView(developerRpcStatus, marginTop(5))
+        runtimeCard.addView(developerMessage, marginTop(10))
+        runtimeCard.addView(actionButton("START LOCAL ENGINE", true) {
+            requestNotificationPermissionIfNeeded()
+            startServiceAction(PresenceEngineService.ACTION_START)
+        }, marginTop(14))
+        runtimeCard.addView(actionButton("CONNECT DISCORD RPC", true) {
+            requestNotificationPermissionIfNeeded()
+            startServiceAction(PresenceEngineService.ACTION_CONNECT_DISCORD)
+        }, marginTop(8))
+        runtimeCard.addView(actionButton("DISCONNECT DISCORD RPC", false) {
+            startServiceAction(PresenceEngineService.ACTION_DISCONNECT_DISCORD)
+        }, marginTop(8))
+        runtimeCard.addView(actionButton("STOP LOCAL ENGINE", false) {
+            startServiceAction(PresenceEngineService.ACTION_STOP)
+        }, marginTop(8))
+        pageContent.addView(runtimeCard)
+
+        val activityCard = card()
+        activityCard.addView(text("WINNING ACTIVITY PAYLOAD", 10, COLOR_ACCENT, true, mono = true))
+        developerActivity = text(runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source").orEmpty(), 12, COLOR_TEXT, true, mono = true)
+        activityCard.addView(developerActivity, marginTop(8))
+        activityCard.addView(text("Local preview is available while RPC is disconnected. A preview does not imply Discord accepted an update.", 10, COLOR_MUTED), marginTop(8))
+        pageContent.addView(activityCard, marginTop(12))
+
+        val identityCard = card()
+        identityCard.addView(text("BUILD / NATIVE IDENTITY", 10, COLOR_ACCENT, true, mono = true))
+        identityCard.addView(text(
+            "PACKAGE / $packageName\nANDROID / ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\nSDK AAR / ${if (BuildConfig.DISCORD_SDK_ENABLED) "PRESENT" else "NOT CONFIGURED"}\nAPPLICATION ID / ${if (BuildConfig.DISCORD_APP_ID > 0L) BuildConfig.DISCORD_APP_ID else "NOT SET"}",
+            10, COLOR_TEXT, mono = true,
+        ), marginTop(8))
+        pageContent.addView(identityCard, marginTop(12))
+
+        val events = card()
+        events.addView(text("ENGINE EVENT LOG", 10, COLOR_ACCENT, true, mono = true))
+        developerEventLog = text("No events recorded", 10, COLOR_MUTED, mono = true)
+        events.addView(developerEventLog, marginTop(8))
+        events.addView(actionButton("COPY DIAGNOSTICS + EVENT LOG", false) { copyDiagnostics() }, marginTop(10))
+        pageContent.addView(events, marginTop(12))
+        renderDeveloperStatus()
+    }
+
+    private fun buildMore() {
+        pageContent.addView(sectionTitle("MORE", "Configuration and local data"))
+        val routes = listOf(
+            Triple("AUTOMATION", "Source priorities and global detection rules", PAGE_AUTOMATION),
+            Triple("LIBRARY", "Saved local activity presets", PAGE_LIBRARY),
+            Triple("SETTINGS", "Privacy, Android permissions and diagnostics", PAGE_SETTINGS),
+        )
+        routes.forEach { (label, description, destination) ->
+            val entry = card()
+            entry.addView(text(label, 12, COLOR_ACCENT, true, mono = true))
+            entry.addView(text(description, 11, COLOR_MUTED), marginTop(5))
+            entry.addView(actionButton("OPEN $label", false) { showPage(destination) }, marginTop(10))
+            pageContent.addView(entry, marginTop(10))
+        }
+    }
+
     private fun buildSettings() {
         pageContent.addView(sectionTitle("SETTINGS & DIAGNOSTICS", "Privacy, permissions, and runtime information"))
         val discord = card()
@@ -560,10 +658,22 @@ class MainActivity : Activity() {
             setTextColor(COLOR_TEXT)
             minHeight = dp(50)
             isChecked = settings.getBoolean(key, defaultValue)
-            setOnCheckedChangeListener { _, checked ->
-                settings.edit().putBoolean(key, checked).apply()
-                onChanged?.invoke(checked)
+            val listener = object : CompoundButton.OnCheckedChangeListener {
+                override fun onCheckedChanged(button: CompoundButton, checked: Boolean) {
+                    settings.edit().putBoolean(key, checked).apply()
+                    try {
+                        onChanged?.invoke(checked)
+                    } catch (exception: Exception) {
+                        Log.e(TAG, "Toggle failed: $key", exception)
+                        settings.edit().putBoolean(key, !checked).apply()
+                        button.setOnCheckedChangeListener(null)
+                        button.isChecked = !checked
+                        button.setOnCheckedChangeListener(this)
+                        Toast.makeText(this@MainActivity, "Could not apply setting: ${exception.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
+            setOnCheckedChangeListener(listener)
         }
         parent.addView(control, marginTop(8))
     }
@@ -642,7 +752,7 @@ class MainActivity : Activity() {
             .setNegativeButton("CANCEL", null)
             .setPositiveButton("SAVE") { _, _ ->
                 settings.edit().putStringSet(BrowserAccessibilityService.KEY_BROWSER_PACKAGES, selected.toSet()).apply()
-                sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName))
+                sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName), PresenceEngineService.INTERNAL_BROADCAST_PERMISSION)
                 if (settings.getBoolean(BrowserAccessibilityService.KEY_TRACK_BROWSER, false) &&
                     settings.getBoolean(PresenceEngineService.KEY_AUTO_SOURCES_ENABLED, true)) {
                     startServiceAction(PresenceEngineService.ACTION_START)
@@ -695,6 +805,7 @@ class MainActivity : Activity() {
             "browserAccessibility=${accessibilityServiceStatus()}",
             "sdkConfigured=${BuildConfig.DISCORD_SDK_ENABLED}",
             "applicationId=${BuildConfig.DISCORD_APP_ID}",
+            "eventLog=${runtime.getString(PresenceEngineService.KEY_EVENT_LOG, "").orEmpty()}",
         ).joinToString("\n")
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("Gecko Presence diagnostics", value))
@@ -714,15 +825,28 @@ class MainActivity : Activity() {
             if (::appSourceStatus.isInitialized) appSourceStatus.text = intent.getStringExtra(PresenceEngineService.EXTRA_APP_TRACKING_STATUS).orEmpty()
             if (::mediaSourceStatus.isInitialized) mediaSourceStatus.text = intent.getStringExtra(PresenceEngineService.EXTRA_MEDIA_TRACKING_STATUS).orEmpty()
         }
+        if (activePage == PAGE_DEVELOPER) renderDeveloperStatus(intent)
+    }
+
+    private fun renderDeveloperStatus(intent: Intent? = null) {
+        if (::developerEngineStatus.isInitialized) {
+            developerEngineStatus.text = "ENGINE / ${intent?.getStringExtra(PresenceEngineService.EXTRA_ENGINE_STATE) ?: runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED").orEmpty()}"
+            developerRpcStatus.text = "RPC / ${intent?.getStringExtra(PresenceEngineService.EXTRA_SDK_STATE) ?: runtime.getString(PresenceEngineService.KEY_SDK_STATE, "SDK_NOT_INITIALIZED").orEmpty()}"
+            developerMessage.text = intent?.getStringExtra(PresenceEngineService.EXTRA_STATUS_MESSAGE)
+                ?: runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "No status").orEmpty()
+            developerActivity.text = intent?.getStringExtra(PresenceEngineService.EXTRA_PRESENCE_PREVIEW)
+                ?: runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source").orEmpty()
+            developerEventLog.text = runtime.getString(PresenceEngineService.KEY_EVENT_LOG, "No events recorded").orEmpty().ifBlank { "No events recorded" }
+        }
     }
 
     private fun renderDashboardStatus() {
         engineStatus.text = "ENGINE / ${runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED")}" 
         discordStatus.text = "DISCORD / ${runtime.getString(PresenceEngineService.KEY_SDK_STATE, "SDK_MISSING")}" 
-        statusMessage.text = runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Start the engine to initialize Direct RPC.")
-        currentActivity.text = runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source")
-        appSourceStatus.text = runtime.getString(PresenceEngineService.KEY_APP_TRACKER_STATUS, "App detector not started")
-        mediaSourceStatus.text = runtime.getString(PresenceEngineService.KEY_MEDIA_TRACKER_STATUS, "Media detector not started")
+        statusMessage.text = runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Start the engine to initialize Direct RPC.").orEmpty()
+        currentActivity.text = runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source").orEmpty()
+        appSourceStatus.text = runtime.getString(PresenceEngineService.KEY_APP_TRACKER_STATUS, "App detector not started").orEmpty()
+        mediaSourceStatus.text = runtime.getString(PresenceEngineService.KEY_MEDIA_TRACKER_STATUS, "Media detector not started").orEmpty()
     }
 
     private fun accessibilityServiceStatus(): String {
@@ -742,9 +866,16 @@ class MainActivity : Activity() {
         startServiceAction(action)
     }
 
-    private fun startServiceAction(action: String) {
+    private fun startServiceAction(action: String): Boolean {
         val intent = Intent(this, PresenceEngineService::class.java).setAction(action)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+            true
+        } catch (exception: RuntimeException) {
+            Log.e(TAG, "Could not dispatch service action: $action", exception)
+            Toast.makeText(this, "Service action failed: ${exception.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            false
+        }
     }
 
     private fun openSystemSettings(action: String) {
@@ -818,13 +949,15 @@ class MainActivity : Activity() {
         private const val PAGE_AUTOMATION = "Automation"
         private const val PAGE_LIBRARY = "Library"
         private const val PAGE_SETTINGS = "Settings"
-        private val PAGES = listOf(PAGE_DASHBOARD, PAGE_SOURCES, PAGE_STUDIO, PAGE_AUTOMATION, PAGE_LIBRARY, PAGE_SETTINGS)
+        private const val PAGE_DEVELOPER = "Developer"
+        private const val PAGE_MORE = "More"
         private const val PREFS_SETTINGS = "gpb_settings"
         private const val PREFS_RUNTIME = "gpb_runtime"
         private const val KEY_STUDIO_DRAFT_NAME = "studio_draft_name"
         private const val KEY_STUDIO_DRAFT_DETAILS = "studio_draft_details"
         private const val KEY_STUDIO_DRAFT_STATE = "studio_draft_state"
         private const val REQUEST_NOTIFICATIONS = 4401
+        private const val TAG = "GeckoPresenceUI"
 
     }
 }
