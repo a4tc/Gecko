@@ -1,10 +1,15 @@
 package app.geckopresence.host
 
+import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.PresenceUpdate
+import java.lang.ref.WeakReference
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Main-looper owner for the Discord Social SDK JNI client and callback pump. */
@@ -12,6 +17,15 @@ object DiscordSdk {
     private const val CALLBACK_INTERVAL_MS = 50L
     private val mainHandler = Handler(Looper.getMainLooper())
     private val initialized = AtomicBoolean(false)
+
+    @Volatile
+    private var engineActivityReady = false
+
+    @Volatile
+    private var engineActivityRef: WeakReference<Activity>? = null
+
+    @Volatile
+    private var engineActivitySetter: Method? = null
 
     @Volatile
     private var appContext: Context? = null
@@ -47,6 +61,105 @@ object DiscordSdk {
         statusListener = listener
     }
 
+    /**
+     * Register the foreground Activity required by Discord's Android C++ SDK bootstrap.
+     * Reflection keeps the no-SDK preview build compilable because the proprietary AAR is
+     * deliberately optional and is only added to the compile classpath in Direct RPC mode.
+     */
+    @Synchronized
+    fun attachEngineActivity(activity: Activity): Boolean {
+        if (!isAvailable) return false
+        return try {
+            CrashDiagnostics.recordCheckpoint(
+                activity,
+                "sdk-bootstrap",
+                "before loading DiscordSocialSdkInit and its JNI bindings",
+            )
+            val sdkInitClass = Class.forName(
+                "com.discord.socialsdk.DiscordSocialSdkInit",
+                true,
+                activity.classLoader,
+            )
+            val setter = sdkInitClass.methods.firstOrNull { method ->
+                method.name == "setEngineActivity" &&
+                    Modifier.isStatic(method.modifiers) &&
+                    method.parameterTypes.size == 1 &&
+                    method.parameterTypes[0].isAssignableFrom(activity.javaClass)
+            } ?: throw NoSuchMethodException(
+                "DiscordSocialSdkInit.setEngineActivity(Activity) was not found",
+            )
+
+            CrashDiagnostics.recordCheckpoint(
+                activity,
+                "sdk-bootstrap",
+                "before DiscordSocialSdkInit.setEngineActivity",
+            )
+            setter.invoke(null, activity)
+            engineActivitySetter = setter
+            engineActivityRef = WeakReference(activity)
+            engineActivityReady = true
+            CrashDiagnostics.recordCheckpoint(
+                activity,
+                "sdk-bootstrap",
+                "DiscordSocialSdkInit.setEngineActivity completed",
+            )
+            true
+        } catch (error: ReflectiveOperationException) {
+            recordActivityBootstrapFailure(activity, error)
+            false
+        } catch (error: LinkageError) {
+            recordActivityBootstrapFailure(activity, error)
+            false
+        } catch (error: RuntimeException) {
+            recordActivityBootstrapFailure(activity, error)
+            false
+        }
+    }
+
+    /** Clear the SDK's Activity reference when the host Activity is actually finishing. */
+    @Synchronized
+    fun detachEngineActivity(activity: Activity) {
+        if (engineActivityRef?.get() !== activity) return
+        try {
+            engineActivitySetter?.invoke(null, null)
+            CrashDiagnostics.recordCheckpoint(
+                activity,
+                "sdk-bootstrap",
+                "DiscordSocialSdkInit.setEngineActivity(null) completed",
+            )
+        } catch (error: ReflectiveOperationException) {
+            CrashDiagnostics.recordNonFatal(activity, "Discord Android Activity detach", unwrapReflectionError(error))
+        } catch (error: LinkageError) {
+            CrashDiagnostics.recordNonFatal(activity, "Discord Android Activity detach", error)
+        } catch (error: RuntimeException) {
+            CrashDiagnostics.recordNonFatal(activity, "Discord Android Activity detach", error)
+        } finally {
+            engineActivityReady = false
+            engineActivityRef = null
+            engineActivitySetter = null
+        }
+    }
+
+    private fun recordActivityBootstrapFailure(activity: Activity, error: Throwable) {
+        engineActivityReady = false
+        engineActivityRef = null
+        engineActivitySetter = null
+        val cause = unwrapReflectionError(error)
+        CrashDiagnostics.recordNonFatal(activity, "Discord Android Activity bootstrap", cause)
+        CrashDiagnostics.recordCheckpoint(
+            activity,
+            "sdk-bootstrap",
+            "failed: ${cause.javaClass.simpleName}",
+        )
+        statusListener?.invoke(
+            "error",
+            "Discord Android Activity bootstrap failed: ${cause.javaClass.simpleName}",
+        )
+    }
+
+    private fun unwrapReflectionError(error: Throwable): Throwable =
+        (error as? InvocationTargetException)?.targetException ?: error
+
     @Synchronized
     fun initialize(context: Context, applicationId: Long): Boolean {
         requireMainThread()
@@ -55,6 +168,18 @@ object DiscordSdk {
 
         val app = context.applicationContext
         appContext = app
+        if (!engineActivityReady || engineActivityRef?.get() == null) {
+            CrashDiagnostics.recordCheckpoint(
+                app,
+                "sdk-init",
+                "blocked: DiscordSocialSdkInit.setEngineActivity was not completed",
+            )
+            statusListener?.invoke(
+                "error",
+                "Discord Android Activity bootstrap has not completed; reopen the app and retry",
+            )
+            return false
+        }
         CrashDiagnostics.recordCheckpoint(app, "sdk-init", "before System.loadLibrary")
         return try {
             System.loadLibrary("gecko_presence_native")

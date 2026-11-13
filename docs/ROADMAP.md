@@ -1,4 +1,4 @@
-# Gecko Presence 0.6.1 — Delivery status
+# Gecko Presence 0.6.2 — Delivery status
 
 | Work package | Status | Evidence / remaining gate |
 |---|---|---|
@@ -34,3 +34,13 @@
 5. Grant Accessibility to the app and test Firefox, Tor Browser, Vivaldi, and other selected browsers individually. Confirm hostname-only behavior and that unsupported browser versions fail closed.
 6. Configure the official AAR and Application ID, then verify a real Discord update and clear.
 7. Test screen-off behavior, process recreation, battery restrictions, and source expiry on device.
+
+
+## 0.6.2 Android SDK bootstrap follow-up
+
+- Register `DiscordSocialSdkInit.setEngineActivity(Activity)` from the main Activity before the service can call native `Client` construction.
+- Remove the wrapper library’s competing `JNI_OnLoad`; capture the VM via `JNIEnv::GetJavaVM()` in `nativeInit()` so ART can resolve the Discord SDK dependency’s JNI bootstrap hook.
+- Gate direct RPC initialization on successful Activity registration.
+- Clear the registered Activity when the host Activity is finishing.
+- Keep preview builds independent of the optional proprietary AAR by resolving the bootstrap entry point reflectively.
+- Required device validation: verify the native `Client` constructor no longer aborts on the WebSocketClient thread, then verify a Rich Presence update appears in Discord. The suspected `JNI_OnLoad` shadowing root cause still requires that real-device confirmation.

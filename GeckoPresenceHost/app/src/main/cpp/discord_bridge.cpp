@@ -104,10 +104,11 @@ std::string FromJavaString(JNIEnv* env, jstring value) {
 
 }
 
-extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
-    g_javaVm = vm;
-    return JNI_VERSION_1_6;
-}
+// Do not define JNI_OnLoad in this wrapper library. Android's loader resolves
+// JNI_OnLoad from the requested library and its DT_NEEDED dependencies. A
+// wrapper-local hook would take precedence over the Discord SDK dependency's
+// hook and prevent its embedded JNI class map from being initialized.
+// Gecko obtains its JavaVM from the first Java->native call instead.
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_app_geckopresence_host_DiscordSdk_nativeInit(
@@ -115,6 +116,10 @@ Java_app_geckopresence_host_DiscordSdk_nativeInit(
     jobject,
     jlong applicationId
 ) {
+    if (env == nullptr || env->GetJavaVM(&g_javaVm) != JNI_OK || g_javaVm == nullptr) {
+        LogError("Could not acquire JavaVM from nativeInit");
+        return JNI_FALSE;
+    }
     if (applicationId <= 0) return JNI_FALSE;
     NotifyStatus("checkpoint:native-init-entered");
 
