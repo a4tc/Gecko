@@ -75,6 +75,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (DiscordSdk.isAvailable) {
+            DiscordSdk.attachEngineActivity(this)
+        }
         window.statusBarColor = COLOR_BACKGROUND
         window.navigationBarColor = COLOR_BACKGROUND
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
@@ -83,6 +86,13 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = 0
         buildShell()
         showPage(activePage)
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) {
+            DiscordSdk.detachEngineActivity(this)
+        }
+        super.onDestroy()
     }
 
     override fun onStart() {
@@ -169,7 +179,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(2), 0, 0)
         })
         header.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val version = text("ANDROID\n0.6.1", 9, COLOR_MUTED, true, mono = true).apply {
+        val version = text("ANDROID\n0.6.2", 9, COLOR_MUTED, true, mono = true).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
         header.addView(version)

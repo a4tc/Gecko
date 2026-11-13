@@ -44,6 +44,11 @@ if native_activity is None or native_activity.group(1).count(": String") != 2:
     raise SystemExit("nativeSetActivity must accept only details, state, and timestamp")
 if "RunCallbacks" not in native_cpp or "std::thread" in native_cpp or "g_callbackThread" in native_cpp:
     raise SystemExit("Discord callbacks must be pumped from the Android main-loop adapter, not a native worker thread")
+if re.search(r"\bJNI_OnLoad\s*\(", native_cpp):
+    raise SystemExit("Gecko native wrapper must not shadow the Discord SDK dependency's JNI_OnLoad hook")
+native_init = re.search(r"Java_app_geckopresence_host_DiscordSdk_nativeInit\s*\(.*?\)\s*\{(.*?)\n\}", native_cpp, re.S)
+if native_init is None or "GetJavaVM(&g_javaVm)" not in native_init.group(1):
+    raise SystemExit("Gecko must acquire JavaVM from nativeInit rather than defining a competing JNI_OnLoad")
 if "postDelayed(this, CALLBACK_INTERVAL_MS)" not in sdk_kt or "nativeRunCallbacks()" not in sdk_kt:
     raise SystemExit("Discord callback pump must be scheduled on the Android main looper")
 if "activity.SetName(" in native_cpp:
@@ -92,6 +97,22 @@ browser_xml = (app / "src/main/res/xml/browser_accessibility_service.xml").read_
 if "TYPE_VIEW_TEXT_CHANGED" not in browser_service or "typeViewTextChanged" not in browser_xml:
     raise SystemExit("Browser address-bar text changes are not observed")
 activity_ui = (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text()
+activity_on_create = re.search(r"override fun onCreate\(savedInstanceState: Bundle\?\).*?\n    }", activity_ui, re.S)
+activity_on_destroy = re.search(r"override fun onDestroy\(\).*?\n    }", activity_ui, re.S)
+if activity_on_create is None or "DiscordSdk.attachEngineActivity(this)" not in activity_on_create.group(0):
+    raise SystemExit("MainActivity must register DiscordSocialSdkInit engine Activity before UI/service actions")
+if activity_on_create.group(0).index("DiscordSdk.attachEngineActivity(this)") > activity_on_create.group(0).index("buildShell()"):
+    raise SystemExit("Discord engine Activity must be registered before the UI can issue an RPC connect action")
+if activity_on_destroy is None or "DiscordSdk.detachEngineActivity(this)" not in activity_on_destroy.group(0):
+    raise SystemExit("MainActivity must clear the Discord engine Activity when it is finishing")
+if any(token not in sdk_kt for token in (
+    "Class.forName(", "method.name == \"setEngineActivity\"", "setter.invoke(null, activity)",
+    "engineActivityReady", "if (!engineActivityReady", "before System.loadLibrary",
+)):
+    raise SystemExit("DiscordSdk must invoke and gate native initialization on the Android engine Activity bootstrap")
+activity_init = re.search(r"fun initialize\(context: Context, applicationId: Long\).*?\n    }", sdk_kt, re.S)
+if activity_init is None or activity_init.group(0).index("if (!engineActivityReady") > activity_init.group(0).index("System.loadLibrary"):
+    raise SystemExit("Discord native library loading must be blocked until Android Activity bootstrap succeeds")
 if any(token not in activity_ui for token in (
     "setOnApplyWindowInsetsListener", "WindowInsets.Type.systemBars()",
     "WindowInsets.Type.displayCutout()", "WindowInsets.Type.ime()",
@@ -133,5 +154,5 @@ if "gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug" n
     raise SystemExit("Android CI must run unit tests and assemble the debug APK")
 if "actions/setup-gradle@v6" not in workflow or "gradle-version: '8.10.2'" not in workflow:
     raise SystemExit("Android CI Gradle setup contract is missing")
-print(f"Source contract checks passed: {len(xml_files)} XML files, {len(external_methods)} JNI methods, main-loop RPC callback pump, crash diagnostics, per-app profiles, native-only runtime, Android CI")
+print(f"Source contract checks passed: {len(xml_files)} XML files, {len(external_methods)} JNI methods, main-loop RPC callback pump, Android Activity bootstrap, dependency JNI_OnLoad preservation, crash diagnostics, per-app profiles, native-only runtime, Android CI")
 PY

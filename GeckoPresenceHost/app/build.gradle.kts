@@ -27,8 +27,8 @@ android {
         applicationId = "app.geckopresence.host"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.6.1"
+        versionCode = 8
+        versionName = "0.6.2"
 
         buildConfigField("boolean", "DISCORD_SDK_ENABLED", discordSdkEnabled.toString())
         buildConfigField("long", "DISCORD_APP_ID", "${discordAppId}L")

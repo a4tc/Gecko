@@ -33,6 +33,14 @@ For GitHub Actions, `DISCORD_SDK_AAR_PATH` may identify an AAR stored at a priva
 
 Discord documents unauthenticated Rich Presence for Android from Social SDK 1.10. The Discord Android app must be installed and signed in, and the integration must use a valid Application ID. Direct RPC does not call `Client::Connect()` or the OAuth token APIs.
 
+The Android host must also register its foreground Activity before native client creation by calling `DiscordSocialSdkInit.setEngineActivity(this)` from `MainActivity.onCreate()`. Gecko uses a reflective adapter for this call so the local Preview build remains compilable when the optional proprietary AAR is absent. Direct RPC initialization is blocked when the Activity bootstrap has not succeeded. The reference is cleared with `setEngineActivity(null)` when the Activity is finishing.
+
+### JNI loader ownership
+
+`libgecko_presence_native.so` must not export its own `JNI_OnLoad`. Android ART resolves `JNI_OnLoad` by calling `dlsym()` on the loaded library handle. Bionic's handle lookup searches the wrapper and its `DT_NEEDED` dependency tree breadth-first, so a wrapper-local symbol wins before the Discord SDK dependency's hook. In SDK 1.10.19337, the crash tombstone's `ClassMapEmbedded not initialized. Did JNI_OnLoad run correctly?` assertion is consistent with the wrapper shadowing the dependency hook.
+
+Gecko therefore obtains its `JavaVM*` through `JNIEnv::GetJavaVM()` at the beginning of `nativeInit()`, after ART has had a chance to run the SDK's JNI bootstrap hook. Do not reintroduce a wrapper-level `JNI_OnLoad` just to cache the VM.
+
 The native adapter:
 
 1. Creates a `discordpp::Client`.
