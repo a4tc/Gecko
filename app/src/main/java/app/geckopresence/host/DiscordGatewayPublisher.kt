@@ -16,8 +16,8 @@ import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.websocket.CloseReason
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
 import io.ktor.websocket.close
-import io.ktor.websocket.closeReason
 import io.ktor.websocket.send
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -204,14 +204,14 @@ class DiscordGatewayPublisher(
                         requestReconnect(currentSocket, "Invalid Gateway JSON")
                         continue
                     }
-                    val opcode = packet.optInt("op", -1)
-                    val data = packet.opt("d")
+                    val opcode = packet.intOrDefault("op", -1)
+                    val data = packet.valueOrNull("d")
 
                     when (opcode) {
                         DiscordGatewayProtocol.OP_HELLO -> {
                             if (handshakeSent) continue
                             helloReceived.complete(Unit)
-                            val heartbeatInterval = (data as? JSONObject)?.optLong("heartbeat_interval", 0L) ?: 0L
+                            val heartbeatInterval = (data as? JSONObject)?.longOrDefault("heartbeat_interval", 0L) ?: 0L
                             if (heartbeatInterval !in MIN_HEARTBEAT_INTERVAL_MS..MAX_HEARTBEAT_INTERVAL_MS) {
                                 requestReconnect(currentSocket, "Invalid heartbeat interval")
                                 continue
@@ -235,13 +235,13 @@ class DiscordGatewayPublisher(
                         }
 
                         DiscordGatewayProtocol.OP_DISPATCH -> {
-                            val sequence = packet.optLong("s", -1L).takeIf { it >= 0L }
+                            val sequence = packet.longOrDefault("s", -1L).takeIf { it >= 0L }
                             if (sequence != null) synchronized(stateLock) { lastSequence = sequence }
-                            when (packet.optString("t")) {
+                            when (packet.stringOrDefault("t")) {
                                 "READY" -> {
                                     val ready = data as? JSONObject
-                                    val newSessionId = ready?.optString("session_id")?.takeIf { it.isNotBlank() }
-                                    val newResumeUrl = safeResumeUrl(ready?.optString("resume_gateway_url"))
+                                    val newSessionId = ready?.stringOrDefault("session_id")?.takeIf { it.isNotBlank() }
+                                    val newResumeUrl = safeResumeUrl(ready?.stringOrDefault("resume_gateway_url"))
                                     synchronized(stateLock) {
                                         if (newSessionId != null) sessionId = newSessionId
                                         if (newResumeUrl != null) resumeGatewayUrl = newResumeUrl
@@ -445,6 +445,18 @@ class DiscordGatewayPublisher(
             currentSocket.close(CloseReason(GATEWAY_RECONNECT_CLOSE_CODE, reason.take(100)))
         }
     }
+
+    private fun JSONObject.intOrDefault(key: String, fallback: Int): Int =
+        try { getInt(key) } catch (_: JSONException) { fallback }
+
+    private fun JSONObject.longOrDefault(key: String, fallback: Long): Long =
+        try { getLong(key) } catch (_: JSONException) { fallback }
+
+    private fun JSONObject.stringOrDefault(key: String): String =
+        try { getString(key) } catch (_: JSONException) { "" }
+
+    private fun JSONObject.valueOrNull(key: String): Any? =
+        try { get(key) } catch (_: JSONException) { null }
 
     private fun safeResumeUrl(raw: String?): String? {
         val uri = runCatching { URI(raw ?: return null) }.getOrNull() ?: return null

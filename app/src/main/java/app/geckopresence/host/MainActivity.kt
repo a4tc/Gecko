@@ -1298,7 +1298,7 @@ class MainActivity : Activity() {
                 marginTop(8),
             )
         }
-        credentialCard.addView(actionButton("LOGIN WITH DISCORD AND IMPORT SESSION", true) {
+        val loginButton = actionButton("LOGIN WITH DISCORD AND IMPORT SESSION", true) {
             AlertDialog.Builder(this)
                 .setTitle("Import your Discord session?")
                 .setMessage("This is not OAuth2. After you sign in, Gecko reads the session credential only when you press Import. It is a bearer credential with broad account access. Gecko stores it encrypted on this device and does not send it to a Gecko server. Gateway publishing uses an undocumented user-session connection and may stop working or expose your account to enforcement. Continue only with your own account.")
@@ -1314,9 +1314,10 @@ class MainActivity : Activity() {
                     }
                 }
                 .show()
-        }, marginTop(10)).apply {
+        }.apply {
             isEnabled = DiscordWebViewIsolation.isAvailable()
         }
+        credentialCard.addView(loginButton, marginTop(10))
         credentialCard.addView(actionButton("REMOVE STORED CREDENTIAL", false) {
             AlertDialog.Builder(this)
                 .setTitle("Remove Discord credential?")
