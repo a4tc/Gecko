@@ -1,5 +1,6 @@
 package app.geckopresence.host
 
+import android.os.Build
 import app.geckopresence.host.core.DiscordGatewayProtocol
 import app.geckopresence.host.core.DiscordTokenInputPolicy
 import app.geckopresence.host.core.GatewayEnvelope
@@ -10,6 +11,7 @@ import app.geckopresence.host.core.GatewayInvalidSessionPolicy
 import app.geckopresence.host.core.PresenceActivity
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.request.header
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.websocket.CloseReason
@@ -112,11 +114,12 @@ class DiscordGatewayPublisher(
     }
 
     fun publish(activity: PresenceActivity?, status: String = "online") {
-        synchronized(stateLock) {
+        val revision = synchronized(stateLock) {
             pendingActivity = activity
             pendingStatus = status.takeIf { it in ALLOWED_PRESENCE_STATUSES } ?: "online"
-            pendingRevision += 1L
+            ++pendingRevision
         }
+        onDiagnostic(if (activity == null) "Presence clear queued revision=$revision" else "Presence queued revision=$revision")
         updateEvents.trySend(Unit)
     }
 
@@ -173,7 +176,12 @@ class DiscordGatewayPublisher(
             var helloTimeoutJob: Job? = null
             try {
                 val currentSocket = withTimeout(CONNECTION_TIMEOUT_MS) {
-                    client.webSocketSession(urlString = targetUrl)
+                    client.webSocketSession(urlString = targetUrl) {
+                        header("User-Agent", "Discord-Android/314013;RNA")
+                        header("Accept-Language", "en-US")
+                        header("Cache-Control", "no-cache")
+                        header("Pragma", "no-cache")
+                    }
                 }
                 currentSocket.maxFrameSize = MAX_GATEWAY_FRAME_BYTES
                 socket = currentSocket
@@ -236,10 +244,10 @@ class DiscordGatewayPublisher(
                                 if (id != null && sequence != null) {
                                     DiscordGatewayProtocol.resume(token, id, sequence)
                                 } else {
-                                    DiscordGatewayProtocol.identify(token, "Windows", "ktor")
+                                    DiscordGatewayProtocol.identify(token, "Android", Build.DEVICE)
                                 }
                             } else {
-                                DiscordGatewayProtocol.identify(token, "Windows", "ktor")
+                                DiscordGatewayProtocol.identify(token, "Android", Build.DEVICE)
                             }
                             sendEnvelope(envelope, currentSocket)
                             handshakeSent = true
@@ -271,6 +279,9 @@ class DiscordGatewayPublisher(
                                 }
                                 "RESUMED" -> {
                                     isReady = true
+                                    // Replay the latest snapshot after session resume.
+                                    lastSentRevision = -1L
+                                    lastPresenceUpdateAt = 0L
                                     retryDelayMs = 1_000L
                                     emitState(STATE_CONNECTED, "Discord Gateway session resumed")
                                     updateEvents.trySend(Unit)
@@ -300,6 +311,7 @@ class DiscordGatewayPublisher(
                     }
                 }
                 receivedCloseCode = currentSocket.closeReason.await()?.code?.toInt()
+                onDiagnostic("Gateway socket closed code=${receivedCloseCode ?: "unknown"}")
             } catch (_: TimeoutCancellationException) {
                 runCatching { socket?.close(CloseReason(GATEWAY_RECONNECT_CLOSE_CODE, "Gateway connection timed out")) }
                 emitState(STATE_RECONNECTING, "Gateway connection timed out")
@@ -421,7 +433,8 @@ class DiscordGatewayPublisher(
         } catch (_: GatewayPayloadTooLargeException) {
             emitState(STATE_ERROR, "Presence payload exceeds Discord's 4,096-byte limit. Shorten text or remove artwork/buttons.")
             return
-        } catch (_: Exception) {
+        } catch (exception: Exception) {
+            onDiagnostic("Presence opcode-3 write failed (${exception.javaClass.simpleName})")
             socket?.let { requestReconnect(it, "Gateway presence send failed") }
             false
         }
@@ -445,7 +458,13 @@ class DiscordGatewayPublisher(
             .put("d", toJsonValue(envelope.data))
             .toString()
         if (!DiscordGatewayProtocol.payloadFitsLimit(payload)) throw GatewayPayloadTooLargeException()
+        if (envelope.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE) {
+            onDiagnostic("Presence opcode-3 attempt bytes=${payload.toByteArray(Charsets.UTF_8).size}")
+        }
         currentSocket.send(Frame.Text(payload))
+        if (envelope.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE) {
+            onDiagnostic("Presence opcode-3 write completed (local socket)")
+        }
         true
     }
 
@@ -486,7 +505,7 @@ class DiscordGatewayPublisher(
         if (!uri.scheme.equals("wss", ignoreCase = true)) return null
         if (uri.port !in setOf(-1, 443) || uri.userInfo != null) return null
         if (host != "discord.gg" && !host.endsWith(".discord.gg")) return null
-        return "wss://${uri.rawAuthority}/?v=10&encoding=json"
+        return "wss://${uri.rawAuthority}/?v=9&encoding=json"
     }
 
     private fun hasResumeState(): Boolean = synchronized(stateLock) {

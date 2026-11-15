@@ -444,6 +444,7 @@ class PresenceEngineService : Service() {
 
     private fun applyPresenceWinner(winner: PresenceUpdate?) {
         latestPresence = winner
+        recordEvent("Presence selected: source=${winner?.sourceType ?: "none"}")
         val globalStatus = getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE)
             .getString(KEY_PRESENCE_STATUS, "online")
             .orEmpty()

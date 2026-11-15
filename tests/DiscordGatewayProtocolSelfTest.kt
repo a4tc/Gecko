@@ -8,19 +8,19 @@ object DiscordGatewayProtocolSelfTest {
     fun run() {
         val identify = DiscordGatewayProtocol.identify(
             token = "owned-account-session-token-placeholder",
-            operatingSystem = "Windows",
-            device = "ktor",
+            operatingSystem = "Android",
+            device = "SM-A047F",
         )
         check(identify.op == DiscordGatewayProtocol.OP_IDENTIFY)
         val identifyData = identify.data as? Map<*, *> ?: error("identify data missing")
         check(identifyData["token"] == "owned-account-session-token-placeholder")
-        check(identifyData["capabilities"] == 65)
+        check(identifyData["capabilities"] == 16381)
         check(identifyData["compress"] == false)
         check(identifyData["largeThreshold"] == 100)
         val properties = identifyData["properties"] as? Map<*, *>
-        check(properties?.get("os") == "Windows")
-        check(properties?.get("browser") == "Discord Client")
-        check(properties?.get("device") == "ktor")
+        check(properties?.get("os") == "Android")
+        check(properties?.get("browser") == "Discord Android")
+        check(properties?.get("device") == "SM-A047F")
 
         val nullHeartbeat = DiscordGatewayProtocol.heartbeat(null)
         check(nullHeartbeat.op == DiscordGatewayProtocol.OP_HEARTBEAT)
@@ -49,16 +49,17 @@ object DiscordGatewayProtocolSelfTest {
             smallImage = PresenceAsset("https://cdn.example/small.webp", "Small artwork"),
             buttons = listOf(PresenceButton("Open source", "https://example.com")),
         )
-        val update = DiscordGatewayProtocol.presenceUpdate(activity, 1569772369344602173L)
+        val update = DiscordGatewayProtocol.presenceUpdate(activity, 1569772369344602173L, nowMillis = 1_700_000_000_000L)
         check(update.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE)
         val data = update.data as? Map<*, *> ?: error("presence data missing")
-        check(data["since"] === GatewayJsonNull)
+        check(data["since"] == 1_700_000_000_000L)
         check(data["status"] == "online")
         check(data["afk"] == false)
         val activities = data["activities"] as? List<*> ?: error("activities missing")
         val wireActivity = activities.single() as Map<*, *>
         check(wireActivity["name"] == "Firefox")
         check(wireActivity["type"] == 3)
+        check(wireActivity["status_display_type"] == 0)
         check(wireActivity["application_id"] == "1569772369344602173")
         val timestamps = wireActivity["timestamps"] as Map<*, *>
         check(timestamps["start"] == 1_700_000_000_000L)
@@ -69,9 +70,9 @@ object DiscordGatewayProtocolSelfTest {
         check(assets["large_url"] == "https://example.com/large")
         check(assets["small_image"] == "https://cdn.example/small.webp")
         val buttons = wireActivity["buttons"] as List<*>
-        val button = buttons.single() as Map<*, *>
-        check(button["label"] == "Open source")
-        check(button["url"] == "https://example.com")
+        check(buttons == listOf("Open source"))
+        val metadata = wireActivity["metadata"] as Map<*, *>
+        check(metadata["button_urls"] == listOf("https://example.com"))
 
         check(DiscordGatewayProtocol.payloadFitsLimit("x".repeat(4_096)))
         check(!DiscordGatewayProtocol.payloadFitsLimit("x".repeat(4_097)))
@@ -125,8 +126,18 @@ object DiscordGatewayProtocolSelfTest {
         check(PresenceActivity(name = "Bad", largeImage = PresenceAsset("file:///sdcard/private.png")).validate().isNotEmpty())
         check(PresenceActivity(name = "Bad", largeImage = PresenceAsset("https://user:pass@cdn.example/image.png")).validate().isNotEmpty())
 
-        val cleared = DiscordGatewayProtocol.presenceUpdate(null, 1569772369344602173L)
-        check(((cleared.data as Map<*, *>)["activities"] as List<*>).isEmpty())
+        val clearedData = DiscordGatewayProtocol.presenceUpdate(null, 1569772369344602173L).data as Map<*, *>
+        check((clearedData["activities"] as List<*>).isEmpty())
+        check(clearedData["since"] == 0L)
+        check(clearedData["afk"] == true)
+
+        val minimalData = DiscordGatewayProtocol.presenceUpdate(
+            PresenceActivity(name = "Firefox"), 1569772369344602173L, nowMillis = 123L,
+        ).data as Map<*, *>
+        val minimalActivity = (minimalData["activities"] as List<*>).single() as Map<*, *>
+        check(minimalActivity.keys == setOf("name", "type", "status_display_type"))
+        check("application_id" !in minimalActivity)
+        check("assets" !in minimalActivity && "buttons" !in minimalActivity && "timestamps" !in minimalActivity)
 
         val mediaUpdate = PresenceActivityMapper.fromUpdate(
             PresenceUpdate(
@@ -180,6 +191,6 @@ object DiscordGatewayProtocolSelfTest {
         )
         check(appUpdate.type == PresenceActivityType.PLAYING)
         check(appUpdate.startedAtEpochSeconds == null)
-        println("DiscordGatewayProtocolSelfTest: identify, heartbeat, resume, source mapping, full activity mapping, and clear payload passed")
+        println("DiscordGatewayProtocolSelfTest: Android Identify, minimal/full payload, button metadata, and clear payload passed")
     }
 }

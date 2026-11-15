@@ -20,7 +20,7 @@ Gecko Presence is a native Android application for local activity detection, per
 
 ## Gateway compatibility note
 
-The publisher uses Ktor 2.3.13 and follows the documented Gateway v10 message lifecycle where applicable. The user-account Identify payload fields follow the public Kizzy implementation because Discord's public Gateway documentation is written for bot/application clients and does not document this user-session flow. `capabilities` and camelCase `largeThreshold` are compatibility-sensitive, undocumented client-session fields. Discord may change or reject them. The use of a normal user account through a Gateway client may violate Discord's rules and can expose the account to enforcement. This project does not claim official Discord support or guaranteed operation.
+The publisher uses Ktor 2.3.13 and follows the Gateway v9 message lifecycle where applicable. The user-account Identify payload fields follow the public Kizzy implementation because Discord's public Gateway documentation is written for bot/application clients and does not document this user-session flow. `capabilities` and camelCase `largeThreshold` are compatibility-sensitive, undocumented client-session fields. Discord may change or reject them. The use of a normal user account through a Gateway client may violate Discord's rules and can expose the account to enforcement. This project does not claim official Discord support or guaranteed operation.
 
 The session import is a local WebView-based bearer-session import, not OAuth2. It only runs after the user signs in and explicitly presses Import. The session is encrypted locally and never sent to Gecko servers. Do not share the imported session credential or build with untrusted parties.
 
