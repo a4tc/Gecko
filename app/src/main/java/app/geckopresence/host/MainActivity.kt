@@ -795,11 +795,11 @@ class MainActivity : Activity() {
         profileCard.addView(streamField, marginTop(6))
         profileCard.addView(text("LARGE ARTWORK", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
         profileCard.addView(largeField, marginTop(6))
-        profileCard.addView(actionButton("PICK / UPLOAD LARGE ARTWORK", false) { launchArtworkPicker(largeField) }, marginTop(5))
+        profileCard.addView(actionButton("PICK / UPLOAD LARGE ARTWORK", false) { launchArtworkPicker(appProfileDraftKey(selectedPackage, "largeImage")) }, marginTop(5))
         profileCard.addView(largeTooltip, marginTop(6))
         profileCard.addView(text("SMALL ARTWORK", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
         profileCard.addView(smallField, marginTop(6))
-        profileCard.addView(actionButton("PICK / UPLOAD SMALL ARTWORK", false) { launchArtworkPicker(smallField) }, marginTop(5))
+        profileCard.addView(actionButton("PICK / UPLOAD SMALL ARTWORK", false) { launchArtworkPicker(appProfileDraftKey(selectedPackage, "smallImage")) }, marginTop(5))
         profileCard.addView(smallTooltip, marginTop(6))
         profileCard.addView(text("BUTTONS · MAXIMUM TWO", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
         profileCard.addView(button1Label, marginTop(6))
@@ -884,6 +884,21 @@ class MainActivity : Activity() {
 
     private fun appProfileDraftKey(packageName: String, field: String): String =
         "studio_app_profile_${packageName}_$field"
+
+    private fun isAllowedArtworkTarget(targetKey: String): Boolean {
+        if (targetKey == KEY_STUDIO_DRAFT_LARGE_IMAGE ||
+            targetKey == KEY_STUDIO_DRAFT_SMALL_IMAGE
+        ) return true
+
+        val trackedPackages = settings
+            .getStringSet(AppPresencePolicy.KEY_TRACKED_PACKAGES, emptySet())
+            .orEmpty()
+
+        return trackedPackages.any { packageName ->
+            targetKey == appProfileDraftKey(packageName, "largeImage") ||
+                targetKey == appProfileDraftKey(packageName, "smallImage")
+        }
+    }
 
     private fun buildAutomation() {
         pageContent.addView(sectionTitle("AUTOMATION", "Source arbitration and global behavior"))
@@ -1205,7 +1220,7 @@ class MainActivity : Activity() {
             Toast.makeText(this, "An artwork operation is already running", Toast.LENGTH_SHORT).show()
             return
         }
-        if (targetKey !in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) {
+        if (!isAllowedArtworkTarget(targetKey)) {
             Toast.makeText(this, "Invalid Studio artwork destination", Toast.LENGTH_SHORT).show()
             return
         }
@@ -1256,7 +1271,7 @@ class MainActivity : Activity() {
     private fun confirmArtworkUpload(artwork: ArtworkGalleryStore.Artwork) {
         artwork.remoteUrl?.let { url ->
             val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
-            if (targetKey in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) {
+            if (isAllowedArtworkTarget(targetKey)) {
                 settings.edit().putString(targetKey, url).commit()
                 clearPendingArtworkSelection()
                 Toast.makeText(this, "Existing artwork linked to Studio", Toast.LENGTH_SHORT).show()
@@ -1309,7 +1324,7 @@ class MainActivity : Activity() {
                     is ImgurAnonymousUploader.Result.Success -> {
                         if (metadataSaved) {
                             val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
-                            if (targetKey in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) {
+                            if (isAllowedArtworkTarget(targetKey)) {
                                 settings.edit().putString(targetKey, result.directUrl).commit()
                                 clearPendingArtworkSelection()
                                 Toast.makeText(this, "Artwork uploaded and inserted into Studio", Toast.LENGTH_LONG).show()
@@ -1351,7 +1366,7 @@ class MainActivity : Activity() {
     private fun restoreCompletedPendingArtwork() {
         val pendingId = settings.getString(KEY_PENDING_ARTWORK_ID, null) ?: return
         val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
-        if (targetKey !in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) return
+        if (!isAllowedArtworkTarget(targetKey)) return
         val hostedUrl = ArtworkGalleryStore.list(this)
             .firstOrNull { it.id == pendingId }
             ?.remoteUrl

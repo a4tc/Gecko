@@ -135,6 +135,10 @@ profile_store = (app / "src/main/java/app/geckopresence/host/AppPresenceProfileS
 app_policy = (app / "src/main/java/app/geckopresence/host/AppPresencePolicy.kt").read_text()
 profile_model = (app / "src/main/java/app/geckopresence/host/core/AppPresenceProfile.kt").read_text()
 media_policy = (app / "src/main/java/app/geckopresence/host/core/ArtworkMediaPolicy.kt").read_text()
+
+require("private fun isAllowedArtworkTarget(targetKey: String): Boolean" in activity and "AppPresencePolicy.KEY_TRACKED_PACKAGES" in activity and 'targetKey == appProfileDraftKey(packageName, "largeImage")' in activity and 'targetKey == appProfileDraftKey(packageName, "smallImage")' in activity, "artwork destinations are restricted to Studio and allow-listed app-profile fields")
+require('launchArtworkPicker(appProfileDraftKey(selectedPackage, "largeImage"))' in activity and 'launchArtworkPicker(appProfileDraftKey(selectedPackage, "smallImage"))' in activity, "app-profile artwork picker writes to the correct per-app draft fields")
+require(activity.count("isAllowedArtworkTarget(targetKey)") >= 4, "artwork destination is revalidated during selection, upload confirmation and recovery")
 require("MAX_FILE_BYTES = 8 * 1024 * 1024" in media_policy and "MAX_TOTAL_BYTES = 64L" in media_policy and "MAX_ITEMS = 40" in media_policy, "artwork gallery has per-file, aggregate-size and item-count bounds")
 require('File(context.filesDir, "artwork-gallery")' in gallery and "canonicalFile" in gallery and "target.takeIf { it.parentFile == directory }" in gallery and 'uri.scheme.equals("content"' in gallery, "gallery content is app-private, content-URI-only, and canonical-path checked")
 require('"image/jpeg"' in media_policy and '"image/png"' in media_policy and '"image/webp"' in media_policy and "ArtworkMediaPolicy.detectImage(bytes)" in gallery, "gallery accepts only magic-byte-verified raster image formats")
