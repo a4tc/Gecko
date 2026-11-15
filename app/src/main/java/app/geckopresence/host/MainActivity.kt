@@ -1470,7 +1470,7 @@ class MainActivity : Activity() {
         )
         credentialCard.addView(
             text(
-                "This is not OAuth2. Paste a session credential you already possess for your own account. Gecko validates it and stores it encrypted with Android Keystore; this screen does not read browser storage, cookies, or clipboard contents. It is a full account bearer secret. After saving, connect the Gateway from Developer Console.",
+                "This is not OAuth2. Sign in to your own Discord account in an isolated WebView, then press Import; Gecko reads the session from Discord's page storage only on that press and stores it encrypted with Android Keystore. It is a full account bearer secret. After saving, connect the Gateway from Developer Console.",
                 11, COLOR_MUTED,
             ),
             marginTop(8),
@@ -1485,7 +1485,7 @@ class MainActivity : Activity() {
         val loginButton = actionButton("IMPORT EXISTING DISCORD SESSION", true) {
             AlertDialog.Builder(this)
                 .setTitle("Import your Discord session?")
-                .setMessage("Paste only a session credential you already possess for your own account. It is a bearer credential with broad account access. Gecko stores it encrypted on this device and does not send it to a Gecko server. This is not OAuth2 and Gateway publishing uses an undocumented user-session connection. Continue only with your own account.")
+                .setMessage("Sign in with your own account only. The imported session is a bearer credential with broad account access. Gecko stores it encrypted on this device and does not send it to a Gecko server. This is not OAuth2 and Gateway publishing uses an undocumented user-session connection. Continue only with your own account.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Continue") { _, _ ->
                     runCatching {
