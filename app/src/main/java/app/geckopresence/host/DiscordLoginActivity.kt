@@ -1,277 +1,145 @@
 package app.geckopresence.host
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.graphics.Color
-import android.net.Uri
-import android.net.http.SslError
 import android.os.Bundle
+import android.text.Editable
+import android.text.InputFilter
+import android.text.InputType
+import android.text.TextWatcher
+import android.text.method.PasswordTransformationMethod
+import android.util.TypedValue
+import android.view.View
 import android.view.WindowManager
-import android.webkit.WebChromeClient
-import android.webkit.GeolocationPermissions
-import android.webkit.PermissionRequest
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.WebViewDatabase
-import android.webkit.SslErrorHandler
-import android.webkit.WebSettings
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.util.TypedValue
-import android.widget.Toast
-import app.geckopresence.host.core.DiscordSessionImportDecoder
+import app.geckopresence.host.core.DiscordTokenInputPolicy
 
-/** Explicit, first-party Discord session import. No JavaScript bridge or external redirect is used. */
+/** Explicit user-controlled import; no WebView storage scraping or JavaScript credential bridge. */
 class DiscordLoginActivity : Activity() {
-    private var discordWebView: WebView? = null
+    private var credentialInput: EditText? = null
     private var importButton: Button? = null
     private var statusView: TextView? = null
     private var importInProgress = false
-    private var cleanupStarted = false
-    private var activityDestroyed = false
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        WebView.setWebContentsDebuggingEnabled(false)
-        if (!DiscordWebViewIsolation.isAvailable()) {
-            Toast.makeText(this, "Isolated Discord sign-in is unavailable on this Android version", Toast.LENGTH_LONG).show()
-            setResult(Activity.RESULT_CANCELED)
-            finish()
-            return
-        }
-        if (!DiscordWebSessionCleanup.markCleanupRequired(this)) {
-            finish()
-            return
-        }
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            filterTouchesWhenObscured = true
             setBackgroundColor(Color.rgb(16, 18, 24))
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
         }
         root.addView(TextView(this).apply {
             text = "DISCORD SESSION IMPORT"
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
         })
-        statusView = TextView(this).apply {
-            text = "Sign in to Discord below. Import is manual and will only work on a signed-in Discord app page."
+        root.addView(TextView(this).apply {
+            text = "Paste a session credential that you already possess for your own Discord account. Gecko validates it and stores it locally using Android Keystore. This is not OAuth2. Never send this value to another person or service."
             setTextColor(Color.LTGRAY)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setPadding(0, dp(8), 0, dp(8))
+            setPadding(0, dp(10), 0, dp(14))
+        })
+
+        credentialInput = EditText(this).apply {
+            hint = "Paste raw session credential (without quotes or Bearer prefix)"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            textSize = 14f
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_VARIATION_PASSWORD or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            transformationMethod = PasswordTransformationMethod.getInstance()
+            filters = arrayOf(InputFilter.LengthFilter(DiscordTokenInputPolicy.MAX_TOKEN_LENGTH))
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            filterTouchesWhenObscured = true
+            setSaveEnabled(false)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.rgb(30, 33, 41))
+                setStroke(dp(1), Color.rgb(84, 90, 102))
+                cornerRadius = dp(6).toFloat()
+            }
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    importButton?.isEnabled = !s.isNullOrBlank() && !importInProgress
+                    statusView?.text = "Credential is kept in this Activity until you import or cancel."
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        root.addView(credentialInput)
+
+        statusView = TextView(this).apply {
+            text = "No credential is stored from this screen yet."
+            setTextColor(Color.LTGRAY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, dp(12), 0, dp(12))
         }
         root.addView(statusView)
-
-        val webView = WebView(this)
-        discordWebView = webView
-        webView.setBackgroundColor(Color.WHITE)
-        webView.isSaveEnabled = false
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            saveFormData = false
-            allowFileAccess = false
-            allowContentAccess = false
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            safeBrowsingEnabled = true
-            databaseEnabled = false
-            setGeolocationEnabled(false)
-            allowFileAccessFromFileURLs = false
-            allowUniversalAccessFromFileURLs = false
-            cacheMode = WebSettings.LOAD_NO_CACHE
-        }
-        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onPermissionRequest(request: PermissionRequest) {
-                request.deny()
-            }
-
-            override fun onGeolocationPermissionsShowPrompt(
-                origin: String?,
-                callback: GeolocationPermissions.Callback?,
-            ) {
-                callback?.invoke(origin, false, false)
-            }
-        }
-        webView.webViewClient = object : WebViewClient() {
-            override fun onReceivedSslError(
-                view: WebView?,
-                handler: SslErrorHandler?,
-                error: SslError?,
-            ) {
-                handler?.cancel()
-                updateStatus("Discord TLS certificate validation failed. Sign-in was stopped.")
-            }
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                // Discord may use third-party challenge frames during sign-in. Keep those isolated
-                // inside the WebView, but never allow them to replace the top-level Discord page.
-                if (!request.isForMainFrame) return false
-                val allowed = isAllowedDiscordUrl(request.url)
-                if (!allowed) {
-                    updateStatus("External top-level navigation was blocked. Continue only on discord.com.")
-                }
-                return !allowed
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
-                val allowed = isAllowedDiscordUrl(Uri.parse(url))
-                if (!allowed) updateStatus("External navigation was blocked. Continue only on discord.com.")
-                return !allowed
-            }
-
-            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                importButton?.isEnabled = false
-                if (!isAllowedDiscordUrl(Uri.parse(url))) {
-                    view.stopLoading()
-                    updateStatus("Navigation blocked: only the Discord HTTPS origin is allowed.")
-                } else {
-                    updateStatus("Discord page loading…")
-                }
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                val ready = isDiscordAppPage(Uri.parse(url))
-                importButton?.isEnabled = ready && !importInProgress
-                updateStatus(
-                    if (ready) "Discord app page detected. Press IMPORT SESSION only when you are ready."
-                    else "Sign in to your Discord account. The import button activates after Discord opens the app page.",
-                )
-            }
-        }
-        root.addView(webView, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            0,
-            1f,
-        ))
 
         importButton = Button(this).apply {
             text = "IMPORT SESSION TO ANDROID KEYSTORE"
             isEnabled = false
-            setOnClickListener { importSessionFromDiscordPage() }
+            setOnClickListener { importPastedSession() }
         }
         root.addView(importButton)
         root.addView(Button(this).apply {
-            text = "CANCEL AND CLEAR WEB SESSION"
+            text = "CANCEL AND CLEAR INPUT"
             setOnClickListener {
+                credentialInput?.text?.clear()
                 setResult(Activity.RESULT_CANCELED)
-                clearWebSession { finish() }
+                finish()
             }
         })
         setContentView(root)
-        DiscordWebSessionCleanup.clear(this) { cleared ->
-            if (!activityDestroyed && !isFinishing && !cleanupStarted) {
-                if (cleared && DiscordWebSessionCleanup.markCleanupRequired(this)) {
-                    webView.loadUrl(DISCORD_LOGIN_URL)
-                } else {
-                    updateStatus("Could not clear an earlier sign-in session. Close Gecko and retry before importing.")
-                }
-            }
-        }
     }
 
-    private fun importSessionFromDiscordPage() {
-        val view = discordWebView ?: return
-        val currentUri = runCatching { Uri.parse(view.url.orEmpty()) }.getOrNull()
-        if (!isDiscordAppPage(currentUri)) {
-            updateStatus("Import is allowed only after the signed-in Discord app page has loaded.")
+    private fun importPastedSession() {
+        if (importInProgress) return
+        val token = DiscordTokenInputPolicy.normalize(credentialInput?.text?.toString().orEmpty())
+        if (token == null) {
+            updateStatus("The pasted value is empty, too short, too long, or contains whitespace. Check it and retry.")
             return
         }
-        if (importInProgress) return
-
         importInProgress = true
         importButton?.isEnabled = false
-        updateStatus("Reading the session locally and encrypting it…")
-        view.evaluateJavascript(READ_SESSION_TOKEN_SCRIPT) { javascriptResult ->
-            // A late JS callback must not import anything after the user cancelled or the Activity closed.
-            if (activityDestroyed || isFinishing || cleanupStarted) return@evaluateJavascript
-            val token = DiscordSessionImportDecoder.decodeJavascriptResult(javascriptResult)
-            if (token == null) {
-                importInProgress = false
-                importButton?.isEnabled = true
-                updateStatus("No usable signed-in session was found. Confirm the Discord login completed, then retry.")
-                return@evaluateJavascript
-            }
-            try {
-                DiscordCredentialVault.save(this, token)
-                setResult(Activity.RESULT_OK)
-                clearWebSession { finish() }
-            } catch (_: Exception) {
-                importInProgress = false
-                importButton?.isEnabled = true
-                updateStatus("Could not store the session in Android Keystore. No credential was imported.")
-            }
+        updateStatus("Validating and encrypting the credential locally…")
+        try {
+            DiscordCredentialVault.save(this, token)
+            credentialInput?.text?.clear()
+            setResult(Activity.RESULT_OK)
+            finish()
+        } catch (_: IllegalArgumentException) {
+            importInProgress = false
+            importButton?.isEnabled = true
+            updateStatus("The credential format was rejected. No value was stored.")
+        } catch (_: Exception) {
+            importInProgress = false
+            importButton?.isEnabled = true
+            updateStatus("Android Keystore could not store the credential. No value was imported.")
         }
-    }
-
-    private fun isAllowedDiscordUrl(uri: Uri): Boolean {
-        val host = uri.host?.lowercase() ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            host in setOf("discord.com", "www.discord.com") &&
-            uri.port in setOf(-1, 443) && uri.userInfo == null
-    }
-
-    private fun isDiscordAppPage(uri: Uri?): Boolean {
-        if (uri == null || !isAllowedDiscordUrl(uri)) return false
-        val path = uri.path.orEmpty()
-        return path == "/app" || path == "/channels" || path.startsWith("/channels/")
     }
 
     private fun updateStatus(message: String) {
         statusView?.text = message
     }
 
-    private fun clearWebSession(onComplete: (() -> Unit)? = null) {
-        if (cleanupStarted) return
-        cleanupStarted = true
-        val view = discordWebView
-        discordWebView = null
-        runCatching {
-            view?.stopLoading()
-            view?.loadUrl("about:blank")
-            view?.clearHistory()
-            view?.clearCache(true)
-            view?.clearFormData()
-            view?.clearSslPreferences()
-            WebViewDatabase.getInstance(this).clearFormData()
-            WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword()
-            WebViewDatabase.getInstance(this).clearUsernamePassword()
-            view?.removeAllViews()
-            view?.destroy()
-        }
-        DiscordWebSessionCleanup.clear(this) { _ -> onComplete?.invoke() }
-    }
-
     override fun onDestroy() {
-        activityDestroyed = true
-        if (!cleanupStarted) clearWebSession()
+        credentialInput?.text?.clear()
+        credentialInput = null
+        importButton = null
+        statusView = null
         super.onDestroy()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    companion object {
-        private const val DISCORD_LOGIN_URL = "https://discord.com/login"
-        private const val READ_SESSION_TOKEN_SCRIPT = """
-            (() => {
-              try {
-                const stored = window.localStorage.getItem('token');
-                if (!stored) return null;
-                let value = stored;
-                try { value = JSON.parse(stored); } catch (_) {}
-                if (typeof value !== 'string' || value.length < 16 || value.length > 4096) return null;
-                if (/\s/.test(value)) return null;
-                return window.btoa(value);
-              } catch (_) {
-                return null;
-              }
-            })();
-        """
-    }
 }
