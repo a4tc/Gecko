@@ -8,8 +8,8 @@ object DiscordGatewayProtocolSelfTest {
     fun run() {
         val identify = DiscordGatewayProtocol.identify(
             token = "owned-account-session-token-placeholder",
-            operatingSystem = "Android 14",
-            device = "Samsung SM-A047F",
+            operatingSystem = "Windows",
+            device = "ktor",
         )
         check(identify.op == DiscordGatewayProtocol.OP_IDENTIFY)
         val identifyData = identify.data as? Map<*, *> ?: error("identify data missing")
@@ -18,9 +18,9 @@ object DiscordGatewayProtocolSelfTest {
         check(identifyData["compress"] == false)
         check(identifyData["largeThreshold"] == 100)
         val properties = identifyData["properties"] as? Map<*, *>
-        check(properties?.get("os") == "Android 14")
-        check(properties?.get("browser") == "Gecko Presence")
-        check(properties?.get("device") == "Samsung SM-A047F")
+        check(properties?.get("os") == "Windows")
+        check(properties?.get("browser") == "Discord Client")
+        check(properties?.get("device") == "ktor")
 
         val nullHeartbeat = DiscordGatewayProtocol.heartbeat(null)
         check(nullHeartbeat.op == DiscordGatewayProtocol.OP_HEARTBEAT)

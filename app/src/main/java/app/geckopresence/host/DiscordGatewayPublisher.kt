@@ -1,6 +1,5 @@
 package app.geckopresence.host
 
-import android.os.Build
 import app.geckopresence.host.core.DiscordGatewayProtocol
 import app.geckopresence.host.core.DiscordTokenInputPolicy
 import app.geckopresence.host.core.GatewayEnvelope
@@ -216,8 +215,6 @@ class DiscordGatewayPublisher(
                                 requestReconnect(currentSocket, "Invalid heartbeat interval")
                                 continue
                             }
-                            localHeartbeat = startHeartbeat(currentSocket, heartbeatInterval)
-                            heartbeatJob = localHeartbeat
                             emitState(STATE_IDENTIFYING, "Discord Gateway handshake started")
                             val envelope = if (resumable) {
                                 val id = synchronized(stateLock) { sessionId }
@@ -225,13 +222,16 @@ class DiscordGatewayPublisher(
                                 if (id != null && sequence != null) {
                                     DiscordGatewayProtocol.resume(token, id, sequence)
                                 } else {
-                                    DiscordGatewayProtocol.identify(token, androidOsLabel(), androidDeviceLabel())
+                                    DiscordGatewayProtocol.identify(token, "Windows", "ktor")
                                 }
                             } else {
-                                DiscordGatewayProtocol.identify(token, androidOsLabel(), androidDeviceLabel())
+                                DiscordGatewayProtocol.identify(token, "Windows", "ktor")
                             }
                             sendEnvelope(envelope, currentSocket)
                             handshakeSent = true
+                            // Do not let the heartbeat coroutine race ahead of IDENTIFY/RESUME.
+                            localHeartbeat = startHeartbeat(currentSocket, heartbeatInterval)
+                            heartbeatJob = localHeartbeat
                         }
 
                         DiscordGatewayProtocol.OP_DISPATCH -> {
@@ -494,9 +494,6 @@ class DiscordGatewayPublisher(
         if (clearSession) clearResumeState()
     }
 
-    private fun androidOsLabel(): String = "Android ${Build.VERSION.RELEASE.orEmpty()}".take(64)
-
-    private fun androidDeviceLabel(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(64)
 
     private fun emitState(state: String, message: String) {
         runCatching { onState(state, message) }

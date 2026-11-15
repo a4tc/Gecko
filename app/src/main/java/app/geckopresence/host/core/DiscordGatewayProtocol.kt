@@ -42,7 +42,7 @@ object DiscordGatewayProtocol {
             "largeThreshold" to 100,
             "properties" to linkedMapOf(
                 "os" to operatingSystem,
-                "browser" to "Gecko Presence",
+                "browser" to "Discord Client",
                 "device" to device,
             ),
             "token" to token,
