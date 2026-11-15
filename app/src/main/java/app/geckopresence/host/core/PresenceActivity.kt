@@ -25,6 +25,9 @@ data class PresenceButton(
     val url: String,
 )
 
+private val APPLICATION_ASSET_KEY_PATTERN =
+    Regex("^(?=.*[A-Za-z])[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
 data class PresenceActivity(
     val name: String,
     val type: PresenceActivityType = PresenceActivityType.PLAYING,
@@ -78,8 +81,9 @@ data class PresenceActivity(
 
     private fun isAllowedImageReference(value: String): Boolean {
         if (value.isBlank() || value.length > 300 || value.any(Char::isWhitespace)) return false
-        if (value.startsWith("mp:", ignoreCase = true)) return value.removePrefix("mp:").isNotBlank()
+        if (value.startsWith("mp:", ignoreCase = true)) return value.substring(3).isNotBlank()
         if (value.all(Char::isDigit)) return value.length in 16..22
+        if (APPLICATION_ASSET_KEY_PATTERN.matches(value)) return true
         return isSafeHttpsUrl(value, 300)
     }
 
