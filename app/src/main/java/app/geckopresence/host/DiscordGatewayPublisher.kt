@@ -55,6 +55,7 @@ import kotlin.random.Random
 class DiscordGatewayPublisher(
     private val applicationId: Long,
     private val onSessionRejected: () -> Unit = {},
+    private val onDiagnostic: (String) -> Unit = {},
     private val onState: (state: String, message: String) -> Unit,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -193,17 +194,30 @@ class DiscordGatewayPublisher(
                 for (frame in currentSocket.incoming) {
                     if (frame !is Frame.Text) continue
                     val message = frame.readText()
-                    if (message.toByteArray(Charsets.UTF_8).size > MAX_GATEWAY_FRAME_BYTES) {
-                        requestReconnect(currentSocket, "Gateway frame exceeded the local safety limit")
-                        continue
-                    }
+                    val frameBytes = message.toByteArray(Charsets.UTF_8).size.toLong()
                     val packet = try {
                         JSONObject(message)
                     } catch (_: JSONException) {
+                        onDiagnostic("Gateway frame probe: invalid JSON bytes=$frameBytes")
                         requestReconnect(currentSocket, "Invalid Gateway JSON")
                         continue
                     }
                     val opcode = packet.intOrDefault("op", -1)
+                    val frameEvent = packet.stringOrDefault("t").ifBlank { "OP_$opcode" }
+
+                    if (opcode == DiscordGatewayProtocol.OP_HELLO ||
+                        (opcode == DiscordGatewayProtocol.OP_DISPATCH &&
+                            frameEvent in setOf("READY", "RESUMED"))
+                    ) {
+                        onDiagnostic("Gateway frame probe: event=$frameEvent opcode=$opcode bytes=$frameBytes")
+                    }
+
+                    if (frameBytes > MAX_ACCEPTED_GATEWAY_FRAME_BYTES) {
+                        onDiagnostic("Gateway frame cap hit: event=$frameEvent opcode=$opcode bytes=$frameBytes cap=$MAX_ACCEPTED_GATEWAY_FRAME_BYTES")
+                        requestReconnect(currentSocket, "Gateway frame exceeded the local safety limit")
+                        continue
+                    }
+
                     val data = packet.valueOrNull("d")
 
                     when (opcode) {
@@ -520,7 +534,8 @@ class DiscordGatewayPublisher(
         private const val MAX_HEARTBEAT_INTERVAL_MS = 120_000L
         private const val CONNECTION_TIMEOUT_MS = 15_000L
         private const val HELLO_TIMEOUT_MS = 15_000L
-        private const val MAX_GATEWAY_FRAME_BYTES = 64L * 1024L
+        private const val MAX_GATEWAY_FRAME_BYTES = 8L * 1024L * 1024L
+        private const val MAX_ACCEPTED_GATEWAY_FRAME_BYTES = 64L * 1024L
         private const val MAX_RETRY_DELAY_MS = 30_000L
         private const val RATE_LIMIT_BACKOFF_MS = 30_000L
         private val GATEWAY_RECONNECT_CLOSE_CODE = 4000.toShort()

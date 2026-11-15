@@ -94,6 +94,11 @@ class PresenceEngineService : Service() {
                 onSessionRejected = {
                     runCatching { DiscordCredentialVault.clear(this@PresenceEngineService) }
                 },
+                onDiagnostic = { message ->
+                    mainHandler.post {
+                        if (engineState != STATE_STOPPED) recordEvent(message)
+                    }
+                },
             ) { state, message ->
                 mainHandler.post {
                     if (engineState == STATE_STOPPED) return@post
