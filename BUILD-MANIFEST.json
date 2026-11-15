@@ -1,8 +1,0 @@
-{
-  "product": "Gecko Presence",
-  "version": "0.6.0",
-  "androidMode": "direct-rpc",
-  "runtime": "native-android",
-  "browserDetection": "optional-accessibility-address-field",
-  "mediaDetection": "optional-notification-listener-media-sessions"
-}
