@@ -85,6 +85,7 @@ object DiscordGatewayProtocolSelfTest {
         check(GatewayCloseCodePolicy.disposition(4004) == GatewayCloseDisposition.AUTHENTICATION_REJECTED)
         check(GatewayCloseCodePolicy.disposition(4007) == GatewayCloseDisposition.RETRY_WITH_NEW_SESSION)
         check(GatewayCloseCodePolicy.disposition(4008) == GatewayCloseDisposition.BACKOFF)
+        check(GatewayCloseCodePolicy.disposition(4015) == GatewayCloseDisposition.TOO_MANY_ACCOUNT_SESSIONS)
         check(GatewayCloseCodePolicy.disposition(4012) == GatewayCloseDisposition.TERMINAL_CONFIGURATION_ERROR)
         check(GatewayInvalidSessionPolicy.sampleRetryDelay { from, _ -> from } == 1_000L)
         check(GatewayInvalidSessionPolicy.sampleRetryDelay { _, until -> until - 1L } == 5_000L)

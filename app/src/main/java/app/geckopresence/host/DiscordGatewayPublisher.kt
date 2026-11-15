@@ -318,6 +318,14 @@ class DiscordGatewayPublisher(
                 }
                 GatewayCloseDisposition.RETRY_WITH_NEW_SESSION -> clearResumeState()
                 GatewayCloseDisposition.BACKOFF -> reconnectDelayOverride = RATE_LIMIT_BACKOFF_MS
+                GatewayCloseDisposition.TOO_MANY_ACCOUNT_SESSIONS -> {
+                    clearResumeState()
+                    emitState(
+                        STATE_ERROR,
+                        "Too many active Discord Gateway sessions (4015). Close other Rich Presence clients, then connect again. Your saved login is retained."
+                    )
+                    return
+                }
                 GatewayCloseDisposition.TERMINAL_CONFIGURATION_ERROR -> {
                     activeToken = null
                     clearResumeState()
@@ -327,7 +335,7 @@ class DiscordGatewayPublisher(
                 GatewayCloseDisposition.RETRY -> Unit
             }
 
-            emitState(STATE_RECONNECTING, "Discord Gateway connection lost; reconnecting")
+            emitState(STATE_RECONNECTING, "Discord Gateway connection lost (close code ${receivedCloseCode ?: "unknown"}); reconnecting")
             val waitMs = reconnectDelayOverride ?: (retryDelayMs + Random.nextLong(0L, 501L))
             reconnectDelayOverride = null
             delay(waitMs)
