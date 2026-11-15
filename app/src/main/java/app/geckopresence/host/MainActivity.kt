@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -31,6 +32,7 @@ import android.widget.AdapterView
 import android.widget.Spinner
 import android.widget.CompoundButton
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -69,7 +71,7 @@ class MainActivity : Activity() {
     private lateinit var developerCrashStatus: TextView
     private var activePage = PAGE_DASHBOARD
     private var receiverRegistered = false
-    private var pendingArtworkField: EditText? = null
+    private var artworkPreviewExecutor: java.util.concurrent.ExecutorService? = null
     @Volatile private var artworkUploadInProgress = false
     @Volatile private var artworkImportInProgress = false
 
@@ -93,6 +95,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        artworkPreviewExecutor?.shutdownNow()
+        artworkPreviewExecutor = null
         super.onDestroy()
     }
 
@@ -114,6 +118,7 @@ class MainActivity : Activity() {
         if (DiscordWebViewIsolation.isAvailable() && DiscordWebSessionCleanup.hasPendingCleanup(this)) {
             DiscordWebSessionCleanup.clear(this)
         }
+        restoreCompletedPendingArtwork()
         showPage(activePage)
     }
 
@@ -138,9 +143,9 @@ class MainActivity : Activity() {
         if (requestCode == REQUEST_ARTWORK_PICKER) {
             if (resultCode == RESULT_OK) {
                 val uri = data?.data
-                if (uri != null) importArtworkSelection(uri) else pendingArtworkField = null
+                if (uri != null) importArtworkSelection(uri) else clearPendingArtworkSelection()
             } else {
-                pendingArtworkField = null
+                clearPendingArtworkSelection()
             }
             return
         }
@@ -454,6 +459,36 @@ class MainActivity : Activity() {
         previewHeading.addView(previewName, marginTop(3))
         previewHeader.addView(previewHeading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         previewCard.addView(previewHeader)
+        val previewArtworkLabels = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        previewArtworkLabels.addView(text("LARGE IMAGE", 9, COLOR_MUTED, true, mono = true),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        previewArtworkLabels.addView(text("SMALL IMAGE", 9, COLOR_MUTED, true, mono = true),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        previewCard.addView(previewArtworkLabels, marginTop(14))
+        val previewArtworkRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val previewLargeArtwork = ImageView(this).apply {
+            contentDescription = "Large artwork preview"
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackground(outline(COLOR_LINE, COLOR_PANEL))
+            setImageResource(android.R.drawable.ic_menu_gallery)
+        }
+        val previewSmallArtwork = ImageView(this).apply {
+            contentDescription = "Small artwork preview"
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackground(outline(COLOR_LINE, COLOR_PANEL))
+            setImageResource(android.R.drawable.ic_menu_gallery)
+        }
+        previewArtworkRow.addView(previewLargeArtwork,
+            LinearLayout.LayoutParams(0, dp(112), 1f).apply { marginEnd = dp(5) })
+        previewArtworkRow.addView(previewSmallArtwork,
+            LinearLayout.LayoutParams(0, dp(112), 1f).apply { marginStart = dp(5) })
+        previewCard.addView(previewArtworkRow, marginTop(5))
         val previewDetails = text("No details", 12, COLOR_TEXT)
         previewCard.addView(previewDetails, marginTop(14))
         val previewState = text("Android · Native", 11, COLOR_MUTED)
@@ -521,8 +556,10 @@ class MainActivity : Activity() {
                 else -> "ONLINE"
             }
             previewAccountStatus.text = "ACCOUNT · $accountLabel"
+            loadArtworkPreview(previewLargeArtwork, largeImage.text.toString())
+            loadArtworkPreview(previewSmallArtwork, smallImage.text.toString())
         }
-        listOf(name, details, state).forEach { field ->
+        listOf(name, details, state, largeImage, smallImage).forEach { field ->
             field.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = updatePreview()
@@ -543,12 +580,14 @@ class MainActivity : Activity() {
         editor.addView(streamUrl, marginTop(6))
         editor.addView(text("ARTWORK · LARGE IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
         editor.addView(largeImage, marginTop(6))
-        editor.addView(actionButton("PICK LARGE ARTWORK FROM GALLERY", false) { launchArtworkPicker(largeImage) }, marginTop(5))
+        editor.addView(actionButton("PICK LARGE ARTWORK FROM GALLERY", false) { launchArtworkPicker(KEY_STUDIO_DRAFT_LARGE_IMAGE) }, marginTop(5))
         editor.addView(largeTooltip, marginTop(6))
+        editor.addView(text("This is the text Discord shows when someone hovers over the large artwork. It is not a help tooltip for this editor.", 10, COLOR_MUTED), marginTop(4))
         editor.addView(text("ARTWORK · SMALL IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
         editor.addView(smallImage, marginTop(6))
-        editor.addView(actionButton("PICK SMALL ARTWORK FROM GALLERY", false) { launchArtworkPicker(smallImage) }, marginTop(5))
+        editor.addView(actionButton("PICK SMALL ARTWORK FROM GALLERY", false) { launchArtworkPicker(KEY_STUDIO_DRAFT_SMALL_IMAGE) }, marginTop(5))
         editor.addView(smallTooltip, marginTop(6))
+        editor.addView(text("This text is displayed by Discord when someone hovers over the small artwork.", 10, COLOR_MUTED), marginTop(4))
         editor.addView(text("RICH PRESENCE BUTTONS · MAX 2", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
         editor.addView(button1Label, marginTop(6))
         editor.addView(button1Url, marginTop(6))
@@ -917,7 +956,24 @@ class MainActivity : Activity() {
         presets.forEach { preset ->
             val entry = card()
             entry.addView(text(preset.label, 14, COLOR_TEXT, true))
+            entry.addView(text("PRESET ID · ${preset.id}", 9, COLOR_MUTED, mono = true), marginTop(5))
+            entry.addView(actionButton("COPY PRESET ID", false) { copyText(preset.id, "Preset ID copied") }, marginTop(4))
+            val presetArtworkRef = runCatching {
+                org.json.JSONObject(preset.advancedFieldsJson).optString(KEY_STUDIO_DRAFT_LARGE_IMAGE)
+            }.getOrDefault("")
+            val presetArtworkPreview = ImageView(this).apply {
+                contentDescription = "${preset.label} artwork preview"
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackground(outline(COLOR_LINE, COLOR_PANEL))
+                setImageResource(android.R.drawable.ic_menu_gallery)
+            }
+            entry.addView(presetArtworkPreview, LinearLayout.LayoutParams(dp(112), dp(112)).apply { topMargin = dp(8) })
+            loadArtworkPreview(presetArtworkPreview, presetArtworkRef)
             entry.addView(text("${preset.name}\n${preset.details}${preset.state?.let { "\n$it" }.orEmpty()}", 11, COLOR_MUTED), marginTop(6))
+            entry.addView(actionButton("DUPLICATE PRESET", false) {
+                PresencePresetStore.duplicate(this, preset.id)
+                showPage(PAGE_LIBRARY)
+            }, marginTop(8))
             entry.addView(actionButton("LOAD INTO STUDIO", true) {
                 settings.edit()
                     .putString(KEY_STUDIO_DRAFT_NAME, preset.name)
@@ -1079,6 +1135,7 @@ class MainActivity : Activity() {
             }
             settings.edit().putString(KEY_IMGUR_CLIENT_ID, value).apply()
             Toast.makeText(this, if (value.isEmpty()) "Imgur hosting disabled" else "Imgur Client-ID saved on this device", Toast.LENGTH_SHORT).show()
+            if (value.isNotEmpty()) resumePendingArtworkUpload()
         }, marginTop(8))
         card.addView(actionButton("OPEN IMGUR APP REGISTRATION", false) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.imgur.com/oauth2/addclient")))
@@ -1098,6 +1155,18 @@ class MainActivity : Activity() {
             items.forEach { item ->
                 gallery.addView(divider(), marginTop(10))
                 gallery.addView(text(item.displayName, 13, COLOR_TEXT, true), marginTop(8))
+                val thumbnail = ImageView(this).apply {
+                    contentDescription = "${item.displayName} artwork thumbnail"
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    setBackground(outline(COLOR_LINE, COLOR_PANEL))
+                    setImageResource(android.R.drawable.ic_menu_gallery)
+                }
+                gallery.addView(thumbnail, LinearLayout.LayoutParams(dp(112), dp(112)).apply { topMargin = dp(8) })
+                loadArtworkPreview(thumbnail, item.id)
+                gallery.addView(text("ID · ${item.id}", 9, COLOR_MUTED, mono = true), marginTop(6))
+                gallery.addView(actionButton("COPY IMAGE ID", false) {
+                    copyText(item.id, "Artwork ID copied")
+                }, marginTop(4))
                 gallery.addView(text("${item.mimeType} · ${item.byteCount / 1024} KiB\n${item.remoteUrl ?: "LOCAL ONLY · NOT UPLOADED"}", 10, COLOR_MUTED, mono = true), marginTop(4))
                 if (item.remoteUrl != null) {
                     val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1112,7 +1181,7 @@ class MainActivity : Activity() {
                     gallery.addView(actions, marginTop(6))
                 } else {
                     gallery.addView(actionButton("UPLOAD TO IMGUR PUBLICLY", false) {
-                        pendingArtworkField = null
+                        clearPendingArtworkSelection()
                         confirmArtworkUpload(item)
                     }, marginTop(6))
                 }
@@ -1131,17 +1200,30 @@ class MainActivity : Activity() {
         pageContent.addView(gallery, marginTop(12))
     }
 
-    private fun launchArtworkPicker(target: EditText) {
+    private fun launchArtworkPicker(targetKey: String) {
         if (artworkUploadInProgress || artworkImportInProgress) {
             Toast.makeText(this, "An artwork operation is already running", Toast.LENGTH_SHORT).show()
             return
         }
-        pendingArtworkField = target
+        if (targetKey !in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) {
+            Toast.makeText(this, "Invalid Studio artwork destination", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // Persist a logical target, not an EditText reference that can disappear when
+        // the Activity is recreated or the user visits Settings to configure Imgur.
+        settings.edit()
+            .putString(KEY_PENDING_ARTWORK_TARGET, targetKey)
+            .remove(KEY_PENDING_ARTWORK_ID)
+            .commit()
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("image/*")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivityForResult(picker, REQUEST_ARTWORK_PICKER)
+        runCatching { startActivityForResult(picker, REQUEST_ARTWORK_PICKER) }
+            .onFailure {
+                clearPendingArtworkSelection()
+                Toast.makeText(this, "Could not open the Android image picker", Toast.LENGTH_LONG).show()
+            }
     }
 
     private fun importArtworkSelection(uri: Uri) {
@@ -1152,17 +1234,20 @@ class MainActivity : Activity() {
             val result = ArtworkGalleryStore.importUri(this, uri)
             runOnUiThread {
                 artworkImportInProgress = false
-                if (isFinishing || isDestroyed) {
-                    pendingArtworkField = null
-                    return@runOnUiThread
-                }
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {
                     is ArtworkGalleryStore.ImportResult.Rejected -> {
+                        clearPendingArtworkSelection()
                         Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
-                        pendingArtworkField = null
                     }
-                    is ArtworkGalleryStore.ImportResult.Added -> confirmArtworkUpload(result.artwork)
-                    is ArtworkGalleryStore.ImportResult.Duplicate -> confirmArtworkUpload(result.artwork)
+                    is ArtworkGalleryStore.ImportResult.Added -> {
+                        settings.edit().putString(KEY_PENDING_ARTWORK_ID, result.artwork.id).commit()
+                        confirmArtworkUpload(result.artwork)
+                    }
+                    is ArtworkGalleryStore.ImportResult.Duplicate -> {
+                        settings.edit().putString(KEY_PENDING_ARTWORK_ID, result.artwork.id).commit()
+                        confirmArtworkUpload(result.artwork)
+                    }
                 }
             }
         }, "gecko-artwork-import").start()
@@ -1170,26 +1255,34 @@ class MainActivity : Activity() {
 
     private fun confirmArtworkUpload(artwork: ArtworkGalleryStore.Artwork) {
         artwork.remoteUrl?.let { url ->
-            pendingArtworkField?.setText(url)
-            pendingArtworkField = null
-            Toast.makeText(this, "Existing uploaded artwork selected", Toast.LENGTH_SHORT).show()
+            val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
+            if (targetKey in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) {
+                settings.edit().putString(targetKey, url).commit()
+                clearPendingArtworkSelection()
+                Toast.makeText(this, "Existing artwork linked to Studio", Toast.LENGTH_SHORT).show()
+                showPage(PAGE_STUDIO)
+            } else {
+                clearPendingArtworkSelection()
+                Toast.makeText(this, "Artwork is already hosted", Toast.LENGTH_SHORT).show()
+                showPage(PAGE_LIBRARY)
+            }
             return
         }
+        settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
         val clientId = settings.getString(KEY_IMGUR_CLIENT_ID, "").orEmpty()
         if (clientId.isBlank()) {
-            pendingArtworkField = null
             AlertDialog.Builder(this)
                 .setTitle("Imgur Client-ID required")
-                .setMessage("The image is saved locally. To use it in Discord Rich Presence, configure your own Imgur Client-ID in Settings, then select this image again from the Gallery.")
+                .setMessage("The image is saved locally and its Studio destination has been retained. Open Settings, save your Imgur Client-ID, and Gecko will resume this artwork selection.")
                 .setPositiveButton("OPEN SETTINGS") { _, _ -> showPage(PAGE_SETTINGS) }
-                .setNegativeButton("KEEP LOCAL", null)
+                .setNegativeButton("KEEP LOCAL") { _, _ -> clearPendingArtworkSelection(); showPage(PAGE_LIBRARY) }
                 .show()
             return
         }
         AlertDialog.Builder(this)
             .setTitle("Upload artwork publicly?")
             .setMessage("Gecko will upload '${artwork.displayName}' (${artwork.byteCount / 1024} KiB) to Imgur using anonymous hosting. Anyone with the resulting URL may view it. The local copy remains on this device. Continue?")
-            .setNegativeButton("CANCEL", null)
+            .setNegativeButton("CANCEL") { _, _ -> clearPendingArtworkSelection() }
             .setPositiveButton("UPLOAD") { _, _ -> uploadArtwork(artwork, clientId) }
             .show()
     }
@@ -1197,6 +1290,7 @@ class MainActivity : Activity() {
     private fun uploadArtwork(artwork: ArtworkGalleryStore.Artwork, clientId: String) {
         if (artworkUploadInProgress || artworkImportInProgress) return
         artworkUploadInProgress = true
+        settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
         Toast.makeText(this, "Uploading artwork to Imgur…", Toast.LENGTH_SHORT).show()
         Thread({
             val file = ArtworkGalleryStore.file(this, artwork)
@@ -1210,30 +1304,105 @@ class MainActivity : Activity() {
             } else false
             runOnUiThread {
                 artworkUploadInProgress = false
-                if (isFinishing || isDestroyed) {
-                    pendingArtworkField = null
-                    return@runOnUiThread
-                }
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {
                     is ImgurAnonymousUploader.Result.Success -> {
                         if (metadataSaved) {
-                            val targetField = pendingArtworkField
-                            if (targetField != null) {
-                                targetField.setText(result.directUrl)
+                            val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
+                            if (targetKey in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) {
+                                settings.edit().putString(targetKey, result.directUrl).commit()
+                                clearPendingArtworkSelection()
+                                Toast.makeText(this, "Artwork uploaded and inserted into Studio", Toast.LENGTH_LONG).show()
+                                showPage(PAGE_STUDIO)
                             } else {
+                                clearPendingArtworkSelection()
+                                Toast.makeText(this, "Artwork uploaded and saved to Gallery", Toast.LENGTH_LONG).show()
                                 showPage(PAGE_LIBRARY)
                             }
-                            Toast.makeText(this, "Artwork uploaded and linked to Gallery", Toast.LENGTH_LONG).show()
                         } else {
                             Toast.makeText(this, "Upload succeeded but local gallery metadata could not be updated", Toast.LENGTH_LONG).show()
                         }
                     }
                     is ImgurAnonymousUploader.Result.Failure ->
-                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, "${result.message} Pending artwork selection was preserved for retry.", Toast.LENGTH_LONG).show()
                 }
-                pendingArtworkField = null
             }
         }, "gecko-artwork-upload").start()
+    }
+
+    private fun clearPendingArtworkSelection() {
+        settings.edit()
+            .remove(KEY_PENDING_ARTWORK_TARGET)
+            .remove(KEY_PENDING_ARTWORK_ID)
+            .apply()
+    }
+
+    private fun resumePendingArtworkUpload() {
+        val pendingId = settings.getString(KEY_PENDING_ARTWORK_ID, null) ?: return
+        val artwork = ArtworkGalleryStore.list(this).firstOrNull { it.id == pendingId }
+        if (artwork == null) {
+            clearPendingArtworkSelection()
+            Toast.makeText(this, "Pending artwork was not found in Gallery", Toast.LENGTH_LONG).show()
+            return
+        }
+        confirmArtworkUpload(artwork)
+    }
+
+    private fun restoreCompletedPendingArtwork() {
+        val pendingId = settings.getString(KEY_PENDING_ARTWORK_ID, null) ?: return
+        val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
+        if (targetKey !in setOf(KEY_STUDIO_DRAFT_LARGE_IMAGE, KEY_STUDIO_DRAFT_SMALL_IMAGE)) return
+        val hostedUrl = ArtworkGalleryStore.list(this)
+            .firstOrNull { it.id == pendingId }
+            ?.remoteUrl
+            ?: return
+        settings.edit()
+            .putString(targetKey, hostedUrl)
+            .remove(KEY_PENDING_ARTWORK_TARGET)
+            .remove(KEY_PENDING_ARTWORK_ID)
+            .apply()
+    }
+
+    private fun copyText(value: String, message: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Gecko Presence", value))
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Local preview lookup is intentionally limited to files Gecko already imported.
+     *  It never fetches arbitrary user-entered URLs or performs network I/O on the UI thread.
+     */
+    private fun loadArtworkPreview(target: ImageView, reference: String) {
+        val key = reference.trim()
+        if (target.tag == key && target.drawable != null) return
+        target.tag = key
+        target.setImageResource(android.R.drawable.ic_menu_gallery)
+        if (key.isBlank()) return
+        val artwork = ArtworkGalleryStore.list(this).firstOrNull {
+            it.id == key || it.remoteUrl.equals(key, ignoreCase = false)
+        } ?: return
+        val file = ArtworkGalleryStore.previewFile(this, artwork) ?: return
+        artworkPreviewExecutor().execute {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            var sample = 1
+            while (bounds.outWidth / sample > 480 || bounds.outHeight / sample > 480) sample *= 2
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+            })
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && target.tag == key && bitmap != null) {
+                    target.setImageBitmap(bitmap)
+                }
+            }
+        }
+    }
+
+    private fun artworkPreviewExecutor(): java.util.concurrent.ExecutorService {
+        return artworkPreviewExecutor ?: java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+            Thread(task, "gecko-artwork-preview").apply { isDaemon = true }
+        }.also { artworkPreviewExecutor = it }
     }
 
     private fun buildSettings() {
@@ -1286,7 +1455,7 @@ class MainActivity : Activity() {
         )
         credentialCard.addView(
             text(
-                "This is not OAuth2. Sign in to Discord in an isolated first-party WebView, then press Import once. Gecko stores the session credential encrypted with Android Keystore and does not send it to Gecko servers. It is a full account bearer secret. After saving, connect the Gateway from Developer Console.",
+                "This is not OAuth2. Paste a session credential you already possess for your own account. Gecko validates it and stores it encrypted with Android Keystore; this screen does not read browser storage, cookies, or clipboard contents. It is a full account bearer secret. After saving, connect the Gateway from Developer Console.",
                 11, COLOR_MUTED,
             ),
             marginTop(8),
@@ -1298,10 +1467,10 @@ class MainActivity : Activity() {
                 marginTop(8),
             )
         }
-        val loginButton = actionButton("LOGIN WITH DISCORD AND IMPORT SESSION", true) {
+        val loginButton = actionButton("IMPORT EXISTING DISCORD SESSION", true) {
             AlertDialog.Builder(this)
                 .setTitle("Import your Discord session?")
-                .setMessage("This is not OAuth2. After you sign in, Gecko reads the session credential only when you press Import. It is a bearer credential with broad account access. Gecko stores it encrypted on this device and does not send it to a Gecko server. Gateway publishing uses an undocumented user-session connection and may stop working or expose your account to enforcement. Continue only with your own account.")
+                .setMessage("Paste only a session credential you already possess for your own account. It is a bearer credential with broad account access. Gecko stores it encrypted on this device and does not send it to a Gecko server. This is not OAuth2 and Gateway publishing uses an undocumented user-session connection. Continue only with your own account.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Continue") { _, _ ->
                     runCatching {
@@ -1314,8 +1483,6 @@ class MainActivity : Activity() {
                     }
                 }
                 .show()
-        }.apply {
-            isEnabled = DiscordWebViewIsolation.isAvailable()
         }
         credentialCard.addView(loginButton, marginTop(10))
         credentialCard.addView(actionButton("REMOVE STORED CREDENTIAL", false) {
@@ -1732,6 +1899,10 @@ class MainActivity : Activity() {
         private const val KEY_STUDIO_DRAFT_NAME = "studio_draft_name"
         private const val KEY_STUDIO_DRAFT_DETAILS = "studio_draft_details"
         private const val KEY_STUDIO_DRAFT_STATE = "studio_draft_state"
+        private const val KEY_STUDIO_DRAFT_LARGE_IMAGE = "studio_draft_large_image"
+        private const val KEY_STUDIO_DRAFT_SMALL_IMAGE = "studio_draft_small_image"
+        private const val KEY_PENDING_ARTWORK_TARGET = "pending_artwork_target"
+        private const val KEY_PENDING_ARTWORK_ID = "pending_artwork_id"
         private const val KEY_STUDIO_PROFILE_PACKAGE = "studio_app_profile_package"
         private const val REQUEST_NOTIFICATIONS = 4401
         private const val REQUEST_EXPORT_CRASH_BUNDLE = 4402

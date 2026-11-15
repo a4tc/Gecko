@@ -127,19 +127,13 @@ require('previewName.text = "Discord application name"' not in main_activity, "S
 require("sendEnvelope(DiscordGatewayProtocol.presenceUpdate(null" not in publisher, "disconnect does not forcibly overwrite account status with online")
 require("EXTRA_GATEWAY_STATE" in service and "KEY_GATEWAY_STATE" in service, "runtime exposes Gateway status only")
 
-# WebView import boundary remains narrow and user-driven.
+# Session import is explicit and local-only; browser storage is never inspected.
 login_path = app / "src/main/java/app/geckopresence/host/DiscordLoginActivity.kt"
-cleanup_path = app / "src/main/java/app/geckopresence/host/DiscordWebSessionCleanup.kt"
 login = login_path.read_text()
-cleanup = cleanup_path.read_text()
-require(not re.search(r"addJavascriptInterface", login, re.I), "no JavaScript bridge into native code")
-require('DISCORD_LOGIN_URL = "https://discord.com/login"' in login, "sign-in starts at Discord HTTPS login")
-require("if (!request.isForMainFrame) return false" in login, "WebView permits isolated challenge subframes while filtering top-level navigations")
-require("setOnClickListener { importSessionFromDiscordPage() }" in login, "session import requires explicit user tap")
-require("window.localStorage.getItem('token')" in login and "DiscordCredentialVault.save(this, token)" in login, "session value handed only to local encrypted vault")
-require("handler?.proceed()" not in login and "handler?.cancel()" in login, "WebView certificate errors fail closed")
-require("setAcceptThirdPartyCookies(webView, false)" in login and "WebView.setWebContentsDebuggingEnabled(false)" in login, "WebView cookies and debugging are hardened")
-require("CookieManager.getInstance().removeAllCookies" in cleanup and "WebStorage.getInstance().deleteAllData" in cleanup, "temporary WebView session data is cleared")
+require("DiscordTokenInputPolicy.normalize" in login and "DiscordCredentialVault.save(this, token)" in login, "pasted session is validated and stored only through the local vault")
+require("FLAG_SECURE" in login and "PasswordTransformationMethod" in login and "IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS" in login, "credential input is masked, excluded from autofill and protected from screenshots")
+require("DiscordTokenInputPolicy.MAX_TOKEN_LENGTH" in login and "InputFilter.LengthFilter" in login, "pasted session input is length-bounded before validation")
+require("evaluateJavascript" not in login and "localStorage" not in login and "addJavascriptInterface" not in login, "session import does not scrape WebView storage or expose a JavaScript bridge")
 
 # CI must exercise both product flavors.
 workflow_path = root / ".github/workflows/gecko.yml"
@@ -158,6 +152,12 @@ profile_store = profile_store_path.read_text()
 gallery = gallery_path.read_text()
 uploader = uploader_path.read_text()
 require("REQUEST_ARTWORK_PICKER" in main_activity and "Intent.ACTION_OPEN_DOCUMENT" in main_activity, "Studio uses Android document picker for local artwork import")
+require("KEY_PENDING_ARTWORK_TARGET" in main_activity and "KEY_PENDING_ARTWORK_ID" in main_activity and "pendingArtworkField" not in main_activity, "artwork destination survives Activity recreation without transient view references")
+require("loadArtworkPreview" in main_activity and "previewLargeArtwork" in main_activity and "previewSmallArtwork" in main_activity, "Studio renders Large and Small artwork previews")
+require("COPY IMAGE ID" in main_activity and "PRESET ID" in main_activity and "COPY PRESET ID" in main_activity, "Gallery and Library expose readable stable IDs and copy actions")
+require("ArtworkGalleryStore.previewFile(this, artwork)" in main_activity and "fun previewFile(context: Context, artwork: Artwork)" in (app / "src/main/java/app/geckopresence/host/ArtworkGalleryStore.kt").read_text(), "preview decoding uses a path/size-checked lightweight file accessor while upload retains SHA-256 verification")
+require("PresencePresetStore.duplicate(this, preset.id)" in main_activity and "fun duplicate(context: Context, id: String)" in (app / "src/main/java/app/geckopresence/host/PresencePresetStore.kt").read_text(), "Library supports duplicating a saved preset")
+require("Executors.newSingleThreadExecutor" in main_activity and "artworkPreviewExecutor?.shutdownNow()" in main_activity, "artwork thumbnails decode on one bounded background worker and stop with the Activity")
 require("Upload artwork publicly?" in main_activity and "confirmArtworkUpload" in main_activity and "UPLOAD TO IMGUR PUBLICLY" in main_activity, "artwork upload is explicit and confirmation-gated from both Studio and Gallery")
 require("KEY_IMGUR_CLIENT_ID" in main_activity and "OPEN IMGUR APP REGISTRATION" in main_activity, "Imgur upload requires user-configured Client-ID")
 require("activityType = profile.activityType" in (app / "src/main/java/app/geckopresence/host/AppPresencePolicy.kt").read_text(), "per-app activity type reaches source arbitration")

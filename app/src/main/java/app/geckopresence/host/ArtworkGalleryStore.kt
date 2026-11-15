@@ -107,6 +107,14 @@ object ArtworkGalleryStore {
         .sortedByDescending { it.createdAt }
         .toList()
 
+    /** UI-only preview access: canonical path and size checks without a full-file SHA-256 pass.
+     *  The upload path must continue to use file(), which verifies the stored digest.
+     */
+    fun previewFile(context: Context, artwork: Artwork): File? {
+        val target = safeLocalFile(context, artwork.id, artwork.fileName) ?: return null
+        return target.takeIf { it.isFile && it.length() == artwork.byteCount }
+    }
+
     fun file(context: Context, artwork: Artwork): File? {
         val target = safeLocalFile(context, artwork.id, artwork.fileName) ?: return null
         if (!target.isFile || target.length() != artwork.byteCount) return null
