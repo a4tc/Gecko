@@ -74,6 +74,27 @@ object PresencePresetStore {
         return preset
     }
 
+    fun duplicate(context: Context, id: String): PresencePreset? {
+        val original = list(context).firstOrNull { it.id == id } ?: return null
+        val existing = list(context).map { it.label.lowercase() }.toSet()
+        var suffix = 1
+        var label: String
+        do {
+            val ending = if (suffix == 1) " copy" else " copy $suffix"
+            label = original.label.take((48 - ending.length).coerceAtLeast(1)) + ending
+            suffix++
+        } while (label.lowercase() in existing && suffix <= MAX_PRESETS + 2)
+        if (label.lowercase() in existing) return null
+        return save(
+            context = context,
+            label = label,
+            name = original.name,
+            details = original.details,
+            state = original.state,
+            advancedFieldsJson = original.advancedFieldsJson,
+        )
+    }
+
     fun delete(context: Context, id: String) {
         persist(context, list(context).filterNot { it.id == id })
     }
