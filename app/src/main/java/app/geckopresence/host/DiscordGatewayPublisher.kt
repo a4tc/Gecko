@@ -535,7 +535,7 @@ class DiscordGatewayPublisher(
         private const val CONNECTION_TIMEOUT_MS = 15_000L
         private const val HELLO_TIMEOUT_MS = 15_000L
         private const val MAX_GATEWAY_FRAME_BYTES = 8L * 1024L * 1024L
-        private const val MAX_ACCEPTED_GATEWAY_FRAME_BYTES = 64L * 1024L
+        private const val MAX_ACCEPTED_GATEWAY_FRAME_BYTES = 8L * 1024L * 1024L
         private const val MAX_RETRY_DELAY_MS = 30_000L
         private const val RATE_LIMIT_BACKOFF_MS = 30_000L
         private val GATEWAY_RECONNECT_CLOSE_CODE = 4000.toShort()
