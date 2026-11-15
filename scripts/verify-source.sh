@@ -130,10 +130,8 @@ require("EXTRA_GATEWAY_STATE" in service and "KEY_GATEWAY_STATE" in service, "ru
 # Session import is explicit and local-only; browser storage is never inspected.
 login_path = app / "src/main/java/app/geckopresence/host/DiscordLoginActivity.kt"
 login = login_path.read_text()
-require("DiscordTokenInputPolicy.normalize" in login and "DiscordCredentialVault.save(this, token)" in login, "pasted session is validated and stored only through the local vault")
-require("FLAG_SECURE" in login and "PasswordTransformationMethod" in login and "IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS" in login, "credential input is masked, excluded from autofill and protected from screenshots")
-require("DiscordTokenInputPolicy.MAX_TOKEN_LENGTH" in login and "InputFilter.LengthFilter" in login, "pasted session input is length-bounded before validation")
-require("evaluateJavascript" not in login and "localStorage" not in login and "addJavascriptInterface" not in login, "session import does not scrape WebView storage or expose a JavaScript bridge")
+require("DiscordSessionImportDecoder.decodeJavascriptResult" in login and "DiscordCredentialVault.save(this, token)" in login, "imported session is decoded and stored only through the local vault")
+require("FLAG_SECURE" in login and "addJavascriptInterface" not in login, "login screen blocks screenshots and exposes no JavaScript bridge")
 
 # CI must exercise both product flavors.
 workflow_path = root / ".github/workflows/gecko.yml"

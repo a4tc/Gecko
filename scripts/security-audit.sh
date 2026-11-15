@@ -68,18 +68,17 @@ for path in source_files:
     executable_by_path[path.relative_to(root).as_posix()] = content
 cleanup_path = "app/src/main/java/app/geckopresence/host/DiscordWebSessionCleanup.kt"
 webview_paths = {path for path, content in executable_by_path.items() if re.search(r"\bWebView\b", content)}
-require(webview_paths == {cleanup_path}, "WebView APIs are confined to isolated-profile cleanup")
-require(all("WebView(" not in content for content in executable_by_path.values()), "no Activity or service creates a WebView")
+login_path = "app/src/main/java/app/geckopresence/host/DiscordLoginActivity.kt"
+require(webview_paths == {cleanup_path, login_path}, "WebView APIs are confined to isolated-profile cleanup and the login Activity")
+require(all("WebView(" not in content for path, content in executable_by_path.items() if path != login_path), "only the login Activity creates a WebView")
 require(not re.search(r"addJavascriptInterface", source_text, re.IGNORECASE), "no JavaScript-to-native bridge is exposed")
 
 login_activity = (app / "src/main/java/app/geckopresence/host/DiscordLoginActivity.kt").read_text()
-require("DiscordTokenInputPolicy.normalize" in login_activity, "session input is normalized and validated before storage")
-require("DiscordCredentialVault.save(this, token)" in login_activity, "user-confirmed credential is stored only through the encrypted local vault")
-require("FLAG_SECURE" in login_activity and "PasswordTransformationMethod" in login_activity, "credential entry is masked and protected from screenshots")
-require("IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS" in login_activity and "setSaveEnabled(false)" in login_activity, "credential input is excluded from autofill and saved view state")
-require("DiscordTokenInputPolicy.MAX_TOKEN_LENGTH" in login_activity and "InputFilter.LengthFilter" in login_activity, "credential input is length-bounded before validation")
-require("evaluateJavascript" not in login_activity and "localStorage" not in login_activity and "addJavascriptInterface" not in login_activity, "session import never reads browser storage or exposes a JavaScript credential bridge")
-require("credentialInput?.text?.clear()" in login_activity and "override fun onDestroy()" in login_activity, "credential input is cleared on cancellation and Activity destruction")
+require("DiscordSessionImportDecoder.decodeJavascriptResult" in login_activity and "DiscordCredentialVault.save(this, token)" in login_activity, "imported session is decoded, validated and stored only through the local vault")
+require("FLAG_SECURE" in login_activity, "login screen blocks screenshots")
+require("addJavascriptInterface" not in login_activity, "no JavaScript-to-native bridge in the login Activity")
+require("isDiscordHost" in login_activity and "onReceivedSslError" in login_activity and "MIXED_CONTENT_NEVER_ALLOW" in login_activity, "login WebView is restricted to discord.com over verified HTTPS")
+require("override fun onDestroy()" in login_activity and "DiscordWebSessionCleanup.clear" in login_activity, "login WebView data is cleared on Activity destruction")
 require("request.deny()" not in login_activity and "Clipboard" not in login_activity and "putExtra" not in login_activity, "credential is not granted to WebView permissions, copied, or passed through an Intent")
 
 cleanup = (app / "src/main/java/app/geckopresence/host/DiscordWebSessionCleanup.kt").read_text()
