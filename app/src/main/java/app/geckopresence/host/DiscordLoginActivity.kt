@@ -156,8 +156,8 @@ class DiscordLoginActivity : Activity() {
                 finish()
             } catch (_: IllegalArgumentException) {
                 fail("The credential format was rejected. Nothing was stored.")
-            } catch (_: Exception) {
-                fail("Android Keystore could not store the credential. Nothing was imported.")
+            } catch (e: Exception) {
+                fail("Android Keystore could not store the credential. Nothing was imported. (${e.javaClass.simpleName}${e.cause?.let { "/" + it.javaClass.simpleName } ?: ""})")
             }
         }
     }
