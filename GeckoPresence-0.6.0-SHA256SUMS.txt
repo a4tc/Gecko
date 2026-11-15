@@ -1,0 +1,2 @@
+bf6fa16eae5d61f02ce83fe0dda743278c34b798b1d2428dadc76964de47a153  GeckoPresence-0.6.0-Android-debug.apk
+ab60b37e744870a60f3d41c379f9618e35afbca26a5e5d537a9c45c5581e4a87  BUILD-MANIFEST.json

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gecko Presence</string>
+    <string name="media_listener_label">Gecko Presence Media Sessions</string>
+    <string name="browser_accessibility_label">Gecko Presence Browser Host Detection</string>
+    <string name="browser_accessibility_description">Optional service that reads only the visible URL field in selected browsers and shares the public hostname. It does not read page content, titles, browsing history, paths, or query parameters.</string>
+</resources>

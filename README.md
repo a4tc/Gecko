@@ -1,52 +1,56 @@
-# Gecko Presence — Signal Deck 0.6.2
+# Gecko Presence — Android application
 
-A native-first Android Rich Presence controller. The Android APK owns source discovery, activity composition, local presets, priority arbitration, preview, diagnostics, and Discord publishing. There is no browser extension, XPI, loopback HTTP bridge, browser pairing key, OAuth login, or Discord user-token flow in the runtime.
+Gecko Presence is a native Android application for local activity detection, per-app presence profiles, and Discord Rich Presence publishing. Version **0.6.6** replaces the official Discord Social SDK/JNI adapter with a Kotlin/Ktor WebSocket publisher and connects the locally encrypted Discord session vault to that publisher.
 
-## Native source adapters
+## Runtime modules
 
-- **Android apps:** opt-in Usage Access plus an explicit allowlist. Only the selected foreground app is retained; sensitive categories and browser packages are excluded.
-- **Media sessions:** opt-in Notification Access through `MediaSessionManager`. Notification content is not read. Media title/artist sharing is a separate setting and is off by default.
-- **Browser / website:** optional Accessibility Service for selected browsers. It searches only known address-bar view IDs and emits a normalized public hostname. It does not inspect DOM, page text, form fields, passwords, paths, query parameters, or history. Some browser versions do not expose a stable address-bar node; compatibility is device/browser dependent.
-- **Custom Presence:** a manual override with a local mock preview and saved local presets. Manual presence always wins over automatic sources.
-- **Per-app Studio profiles:** selected Android packages can keep their own activity label, details, and optional state. Profiles are stored locally and used only by the matching app source.
+- `PresenceEngineService`: foreground source lifecycle, presence arbitration, candidate expiry, and Gateway publisher coordination.
+- `DiscordGatewayPublisher`: single WebSocket owner; Hello/Identify, heartbeat/ACK, Ready/Resume, reconnect backoff, clear activity when the active winner disappears, and rate-limited update coalescing. An explicit disconnect closes the socket without sending a forced online status.
+- `DiscordGatewayProtocol`: independently tested wire payload builders for Identify, Heartbeat, Resume, and Presence Update.
+- `DiscordCredentialVault`: local AES-256-GCM encryption using a non-exportable Android Keystore key; plaintext is loaded only when the user explicitly connects.
+- `DiscordLoginActivity`: isolated first-party Discord web-session import. This is **not OAuth2** and is not an official Discord authentication interface.
+- `UsageAppTracker`: selected foreground packages from Usage Access; no UI scraping or usage-history persistence.
+- `MediaSessionPresenceTracker`: active media sessions through the user-enabled Notification Listener; notification contents are not read.
+- `BrowserAccessibilityService`: selected-browser address-bar host detection only; no page DOM or body text extraction.
+- `PresencePriorityPolicy`: user-adjustable automatic source priorities; manual presence is fixed at 100.
+- `PresencePresetStore`: local-only saved presets, including the advanced manual Studio fields.
+- `AppPresenceProfileStore`: package-keyed profiles with activity type, name, details, state, stream URL, large/small artwork, buttons, timestamps, priority override, enable switch, and optional account-status override.
+- `ArtworkGalleryStore`: bounded app-private image gallery with SHA-256 deduplication and tamper checks. Local images are never uploaded automatically.
+- `ImgurAnonymousUploader`: optional user-configured Imgur Client-ID upload; only explicitly confirmed uploads leave the device and become publicly reachable.
 
-## Product navigation
+## Gateway compatibility note
 
-1. Dashboard
-2. Sources
-3. Presence Studio
-4. Automation
-5. Library
-6. Settings & Diagnostics
+The publisher uses Ktor 2.3.13 and follows the documented Gateway v10 message lifecycle where applicable. The user-account Identify payload fields follow the public Kizzy implementation because Discord's public Gateway documentation is written for bot/application clients and does not document this user-session flow. `capabilities` and camelCase `largeThreshold` are compatibility-sensitive, undocumented client-session fields. Discord may change or reject them. The use of a normal user account through a Gateway client may violate Discord's rules and can expose the account to enforcement. This project does not claim official Discord support or guaranteed operation.
 
-The current Discord native adapter publishes a source/details line, optional state, and start timestamp. The first `Playing [application name]` line is controlled by the Discord Developer Portal registration. Artwork, buttons, party data, and other optional Discord fields are intentionally not presented as supported controls until the AAR mapping is implemented and verified.
+The session import is a local WebView-based bearer-session import, not OAuth2. It only runs after the user signs in and explicitly presses Import. The session is encrypted locally and never sent to Gecko servers. Do not share the imported session credential or build with untrusted parties.
 
-## Privacy and permissions
+## Permissions
 
-All sources are off by default. The app requests Usage Access, Notification Access, or Accessibility access only when the user enables the corresponding source. Browser detection uses a package allowlist and known address-field identifiers; if the browser hides the field, the adapter returns no candidate. Sensitive domains are rejected before a presence candidate is accepted. Candidate data is in-memory and expires when the source stops refreshing.
+All automation sources default off. The `secure` flavor excludes Usage Access, Notification Listener, and Accessibility service declarations. The `automation` flavor adds those optional capabilities. Browser detection needs Accessibility's window-content capability because Android exposes the address field through `AccessibilityNodeInfo`; the implementation restricts reads to selected browser packages and known address-bar resource IDs.
 
-See `docs/CHANGELOG-0.6.2.md`, `docs/ARCHITECTURE-0.6.2-ADDENDUM.md`, `docs/ARCHITECTURE-0.6.1-ADDENDUM.md`, `docs/ARCHITECTURE-0.6.0.md`, `docs/PRIVACY-CONTRACT.md`, and `GeckoPresenceHost/docs/SECURITY.md`.
-
-## Build
-
-Run the Android-only workflow `.github/workflows/gecko.yml`. It tests the pure Kotlin core and builds the APK with JDK 17, Gradle 8.10.2, Android SDK 35, NDK 27.2.12479018, and CMake 3.22.1.
-
-For Direct Rich Presence, supply the official `discord_partner_sdk.aar` from Discord's Developer Portal and set the repository variable `DISCORD_APP_ID`. For a local build, copy the AAR to `GeckoPresenceHost/app/libs/discord_partner_sdk.aar`; keep it in private or access-controlled storage. Without both inputs, CI builds local Preview mode; Preview is not evidence of Discord publishing.
+## Local tests
 
 ```sh
-cd GeckoPresenceHost
-sh scripts/test-core.sh
-./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+bash scripts/test-core.sh
+bash scripts/verify-source.sh
+bash scripts/security-audit.sh
+bash scripts/test-imgur-upload-dynamic.sh
 ```
 
-## Source map
+Full Android build (when the Android toolchain is installed):
 
-- `GeckoPresenceHost/`: Android application, native source adapters, service, UI, SDK JNI adapter.
-- `GeckoPresenceResearch/`: retained PreMiD/import research and third-party notices only; not built, packaged, loaded, or executed by the app.
-- `docs/ARCHITECTURE-0.6.0.md`: native architecture baseline.
-- `docs/ARCHITECTURE-0.6.2-ADDENDUM.md`: Android Discord SDK Activity bootstrap, JNI_OnLoad shadowing correction, and GetJavaVM-based native initialization added in 0.6.2.
-- `docs/ARCHITECTURE-0.6.1-ADDENDUM.md`: SDK callback lifecycle, per-app profiles, and crash diagnostics added in 0.6.1.
-- `docs/CHANGELOG-0.6.2.md`: Activity bootstrap crash investigation and 0.6.2 changes.
-- `docs/CHANGELOG-0.6.1.md`: per-app profiles and crash diagnostics.
-- `docs/PRIVACY-CONTRACT.md`: source-by-source data and permission contract.
-- `docs/DESIGN-SYSTEM.md`: SIGNAL DECK visual direction.
+```sh
+gradle --no-daemon :app:testSecureDebugUnitTest :app:testAutomationDebugUnitTest
+gradle --no-daemon :app:assembleSecureDebug :app:assembleAutomationDebug
+```
+
+The project uses JDK 17, Gradle 8.10.2, Android SDK Platform 35, AGP 8.8.2, and Kotlin 2.0.21. The source archive does not include `gradle-wrapper.jar`; use an installed Gradle 8.10.2 (as in the commands above) or the included GitHub Actions workflow. Ktor is pinned to 2.3.13 to remain on the Kotlin 2.0-compatible 2.x line; the Ktor 3.3+ line has moved its documented baseline to Kotlin 2.2 and later. The targeted local dynamic tests exercise the uploader against a loopback HTTP server and fuzz the pure protocol/media policies; they are not a full device penetration test. See [docs/SECURITY-PENTEST-0.6.6.md](docs/SECURITY-PENTEST-0.6.6.md) for findings and limitations.
+
+## Known limits
+
+- Real Discord session login, Gateway Identify, Resume, and publishing require an on-device test with the user's own account. No user credential is embedded in this source package.
+- The exact user-session Identify flow is undocumented and can change independently of the documented bot Gateway protocol.
+- Manual Studio and per-app profiles expose all six activity types, Twitch/YouTube stream URL, large/small artwork with tooltips, up to two HTTPS buttons, optional start/end timestamps, and account status. Per-app profiles additionally support priority overrides and enable/disable.
+- Gallery imports are private/local. To make an image visible to Discord, configure your own Imgur Client-ID in Settings and explicitly approve public upload. Gecko does not need your Imgur password or Client Secret. Imgur anonymous uploads are not private; the resulting URL is public to anyone who has it.
+- The publisher has inbound frame bounds and a HELLO timeout. Real Discord Gateway acceptance and rich-presence rendering remain device-test requirements.
+- Rooted-device and runtime-instrumentation resistance is not guaranteed by Android Keystore encryption alone.
