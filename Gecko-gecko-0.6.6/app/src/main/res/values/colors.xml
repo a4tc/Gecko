@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="screen_bg">#060A13</color>
+    <color name="panel_bg">#101725</color>
+    <color name="panel_glass_top">#1A263B</color>
+    <color name="signal_yellow">#C8FF24</color>
+    <color name="signal_cyan">#00D8F5</color>
+    <color name="signal_magenta">#FF3D9A</color>
+    <color name="signal_green">#58F7A7</color>
+    <color name="text_primary">#F4F7FC</color>
+    <color name="text_secondary">#CBD5E1</color>
+    <color name="text_muted">#95A9BE</color>
+    <color name="line">#426B86</color>
+    <color name="discord_card_bg">#131B29</color>
+</resources>
