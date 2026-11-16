@@ -31,6 +31,7 @@ class UsageAppTracker(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var workerThread: HandlerThread? = null
     private var workerHandler: Handler? = null
+    private var pollTask: Runnable? = null
 
     @Volatile
     private var running = false
@@ -38,44 +39,50 @@ class UsageAppTracker(
     private var generation = 0
 
     private var lastQueryTime = System.currentTimeMillis() - INITIAL_LOOKBACK_MS
-    private var foregroundPackage: String? = null
+    private var foregroundState = ForegroundEventReducer.State()
     private var lastReportedPackage: String? = null
     private var pollCount = 0
     private var totalEventsRead = 0
     private var lastSelectedAppLabel: String? = null
 
-    private val pollTask = object : Runnable {
-        override fun run() {
-            if (!running) return
-            pollForegroundPackage()
-            if (running) workerHandler?.postDelayed(this, POLL_INTERVAL_MS)
-        }
-    }
-
     fun start() {
         if (running) return
         running = true
         generation += 1
+        val taskGeneration = generation
         lastQueryTime = System.currentTimeMillis() - INITIAL_LOOKBACK_MS
+        foregroundState = ForegroundEventReducer.State()
+        lastReportedPackage = null
         pollCount = 0
         totalEventsRead = 0
         lastSelectedAppLabel = null
-        val thread = HandlerThread("GPB-AppTracker").apply { start() }
+
+        val thread = HandlerThread("GPB-AppTracker-$taskGeneration").apply { start() }
+        val handler = Handler(thread.looper)
         workerThread = thread
-        workerHandler = Handler(thread.looper)
-        emitDiagnostics("Detector starting · waiting for UsageEvents")
-        workerHandler?.post(pollTask)
+        workerHandler = handler
+        val task = object : Runnable {
+            override fun run() {
+                if (!isCurrentGeneration(taskGeneration)) return
+                pollForegroundPackage(taskGeneration)
+                if (isCurrentGeneration(taskGeneration)) handler.postDelayed(this, POLL_INTERVAL_MS)
+            }
+        }
+        pollTask = task
+        emitDiagnostics("Detector starting · waiting for UsageEvents", taskGeneration)
+        handler.post(task)
     }
 
     fun stop() {
         if (!running && workerThread == null) return
         running = false
         generation += 1
-        workerHandler?.removeCallbacks(pollTask)
+        pollTask?.let { workerHandler?.removeCallbacks(it) }
+        pollTask = null
         workerThread?.quitSafely()
         workerHandler = null
         workerThread = null
-        foregroundPackage = null
+        foregroundState = ForegroundEventReducer.State()
         val shouldClear = lastReportedPackage != null
         lastReportedPackage = null
         if (shouldClear) {
@@ -86,57 +93,80 @@ class UsageAppTracker(
         }
     }
 
-    private fun pollForegroundPackage() {
-        pollCount += 1
-        if (!hasUsageAccess(appContext)) {
-            foregroundPackage = null
-            report(null)
-            emitDiagnostics("Usage Access missing · grant it in Android Settings")
-            return
-        }
+    private fun isCurrentGeneration(expectedGeneration: Int): Boolean =
+        running && generation == expectedGeneration
 
-        val now = System.currentTimeMillis()
-        val begin = maxOf(0L, lastQueryTime, now - MAX_LOOKBACK_MS)
+    private fun pollForegroundPackage(expectedGeneration: Int) {
+        if (!isCurrentGeneration(expectedGeneration)) return
+        val nextPollCount = pollCount + 1
+        var nextTotalEventsRead = totalEventsRead
+        var nextLastSelectedAppLabel = lastSelectedAppLabel
+        var nextForegroundState = foregroundState
+
         try {
+            if (!hasUsageAccess(appContext)) {
+                if (!isCurrentGeneration(expectedGeneration)) return
+                pollCount = nextPollCount
+                foregroundState = ForegroundEventReducer.State()
+                report(null, expectedGeneration)
+                emitDiagnostics("Usage Access missing · grant it in Android Settings", expectedGeneration)
+                return
+            }
+
+            val now = System.currentTimeMillis()
+            val begin = maxOf(0L, lastQueryTime, now - MAX_LOOKBACK_MS)
             val events = usageStats.queryEvents(begin, now)
             val event = UsageEvents.Event()
             var eventsRead = 0
             var lastEventLabel = "none"
 
             while (events.hasNextEvent()) {
+                if (!isCurrentGeneration(expectedGeneration)) return
                 events.getNextEvent(event)
                 eventsRead += 1
-                totalEventsRead += 1
+                nextTotalEventsRead += 1
                 val packageName = event.packageName
+                val activityClassName = event.className
                 val kind = classifyEvent(event.eventType)
                 lastEventLabel = eventTypeLabel(event.eventType)
                 val allowed = kind == ForegroundEventKind.RESUMED &&
                     !packageName.isNullOrBlank() && isAllowedPackage(packageName)
                 if (allowed && packageName != null) {
-                    lastSelectedAppLabel = appLabel(packageName)
+                    nextLastSelectedAppLabel = appLabel(packageName)
                 }
-                foregroundPackage = ForegroundEventReducer.reduce(
-                    currentPackage = foregroundPackage,
+                nextForegroundState = ForegroundEventReducer.reduce(
+                    current = nextForegroundState,
                     eventPackage = packageName,
+                    eventClassName = activityClassName,
                     eventKind = kind,
                     isAllowedPackage = allowed,
+                    eventTimestampMillis = event.timeStamp,
                 )
             }
 
+            if (!isCurrentGeneration(expectedGeneration)) return
+            pollCount = nextPollCount
+            totalEventsRead = nextTotalEventsRead
+            lastSelectedAppLabel = nextLastSelectedAppLabel
+            foregroundState = nextForegroundState
             lastQueryTime = maxOf(begin, now - OVERLAP_MS)
-            report(foregroundPackage)
-            val activeLabel = foregroundPackage?.let(::appLabel)
+            report(foregroundState.packageName, expectedGeneration)
+            val activeLabel = foregroundState.packageName?.let(::appLabel)
             val eventSummary = if (eventsRead == 0) "no new events" else "$eventsRead events · last $lastEventLabel"
             val activeSummary = activeLabel?.let { "active $it" } ?: "no selected app active"
             val previousSummary = lastSelectedAppLabel?.let { " · last selected $it" }.orEmpty()
-            emitDiagnostics("Detector polling · $pollCount polls · $totalEventsRead total events · $eventSummary · $activeSummary$previousSummary")
+            emitDiagnostics("Detector polling · $pollCount polls · $totalEventsRead total events · $eventSummary · $activeSummary$previousSummary", expectedGeneration)
         } catch (_: SecurityException) {
-            foregroundPackage = null
-            report(null)
-            emitDiagnostics("UsageEvents query denied · recheck Usage Access permission")
+            if (!isCurrentGeneration(expectedGeneration)) return
+            pollCount = nextPollCount
+            foregroundState = ForegroundEventReducer.State()
+            report(null, expectedGeneration)
+            emitDiagnostics("UsageEvents query denied · recheck Usage Access permission", expectedGeneration)
         } catch (exception: RuntimeException) {
+            if (!isCurrentGeneration(expectedGeneration)) return
+            pollCount = nextPollCount
             // Keep the last known foreground state during transient OEM query failures.
-            emitDiagnostics("UsageEvents query error · ${exception.javaClass.simpleName} · retrying")
+            emitDiagnostics("UsageEvents query error · ${exception.javaClass.simpleName} · retrying", expectedGeneration)
         }
     }
 
@@ -168,19 +198,18 @@ class UsageAppTracker(
             .getOrDefault("selected app")
     }
 
-    private fun report(packageName: String?) {
-        if (packageName == lastReportedPackage) return
+    private fun report(packageName: String?, expectedGeneration: Int) {
+        if (!isCurrentGeneration(expectedGeneration) || packageName == lastReportedPackage) return
         lastReportedPackage = packageName
-        val callbackGeneration = generation
         mainHandler.post {
-            if (callbackGeneration == generation) onForegroundPackageChanged(packageName)
+            if (isCurrentGeneration(expectedGeneration)) onForegroundPackageChanged(packageName)
         }
     }
 
-    private fun emitDiagnostics(message: String) {
-        val callbackGeneration = generation
+    private fun emitDiagnostics(message: String, expectedGeneration: Int) {
+        if (!isCurrentGeneration(expectedGeneration)) return
         mainHandler.post {
-            if (callbackGeneration == generation) onDiagnosticsChanged(message)
+            if (isCurrentGeneration(expectedGeneration)) onDiagnosticsChanged(message)
         }
     }
 

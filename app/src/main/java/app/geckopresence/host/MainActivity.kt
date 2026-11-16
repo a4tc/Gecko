@@ -17,6 +17,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
 import android.text.TextWatcher
@@ -32,6 +34,7 @@ import android.widget.AdapterView
 import android.widget.Spinner
 import android.widget.CompoundButton
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -42,6 +45,7 @@ import android.widget.Toast
 import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.AppPresenceProfile
+import app.geckopresence.host.core.RuntimeTogglePolicy
 
 class MainActivity : Activity() {
     private val COLOR_BACKGROUND: Int get() = getColor(R.color.screen_bg)
@@ -52,6 +56,10 @@ class MainActivity : Activity() {
     private val COLOR_MUTED: Int get() = getColor(R.color.text_muted)
     private val COLOR_LINE: Int get() = getColor(R.color.line)
     private val COLOR_DISCORD_CARD: Int get() = getColor(R.color.discord_card_bg)
+    private val COLOR_CYAN: Int get() = getColor(R.color.signal_cyan)
+    private val COLOR_MAGENTA: Int get() = getColor(R.color.signal_magenta)
+    private val COLOR_GREEN: Int get() = getColor(R.color.signal_green)
+    private val COLOR_GLASS_TOP: Int get() = getColor(R.color.panel_glass_top)
 
     private val settings by lazy { getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE) }
     private val runtime by lazy { getSharedPreferences(PREFS_RUNTIME, MODE_PRIVATE) }
@@ -69,7 +77,9 @@ class MainActivity : Activity() {
     private lateinit var developerActivity: TextView
     private lateinit var developerEventLog: TextView
     private lateinit var developerCrashStatus: TextView
+    private var runtimeToggleButton: Button? = null
     private var activePage = PAGE_DASHBOARD
+    private val pageHistory = java.util.ArrayDeque<String>()
     private var receiverRegistered = false
     private var artworkPreviewExecutor: java.util.concurrent.ExecutorService? = null
     @Volatile private var artworkUploadInProgress = false
@@ -162,6 +172,15 @@ class MainActivity : Activity() {
         Toast.makeText(this, "Exported $exported diagnostic files", Toast.LENGTH_LONG).show()
     }
 
+    @Deprecated("Use the Android system Back gesture")
+    override fun onBackPressed() {
+        if (pageHistory.isNotEmpty()) {
+            showPage(pageHistory.removeLast(), recordHistory = false)
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     private fun buildShell() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -204,7 +223,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(2), 0, 0)
         })
         header.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val version = text("ANDROID\n0.6.4", 9, COLOR_MUTED, true, mono = true).apply {
+        val version = text("ANDROID\n0.6.6", 9, COLOR_MUTED, true, mono = true).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
         header.addView(version)
@@ -248,11 +267,11 @@ class MainActivity : Activity() {
             "HOME" to PAGE_DASHBOARD,
             "SOURCES" to PAGE_SOURCES,
             "STUDIO" to PAGE_STUDIO,
-            "DEV" to PAGE_DEVELOPER,
-            "MORE" to PAGE_MORE,
+            "LIBRARY" to PAGE_LIBRARY,
+            "SETTINGS" to PAGE_SETTINGS,
         )
         val selectedDestination = when (activePage) {
-            PAGE_AUTOMATION, PAGE_LIBRARY, PAGE_SETTINGS -> PAGE_MORE
+            PAGE_AUTOMATION, PAGE_DEVELOPER -> PAGE_SETTINGS
             else -> activePage
         }
         destinations.forEach { (label, destination) ->
@@ -281,7 +300,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showPage(page: String) {
+    private fun showPage(page: String, recordHistory: Boolean = true) {
+        if (recordHistory && page != activePage) {
+            pageHistory.addLast(activePage)
+            while (pageHistory.size > 16) pageHistory.removeFirst()
+        }
         activePage = page
         if (page == PAGE_SETTINGS) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -295,7 +318,6 @@ class MainActivity : Activity() {
             PAGE_LIBRARY -> buildLibrary()
             PAGE_SETTINGS -> buildSettings()
             PAGE_DEVELOPER -> buildDeveloper()
-            PAGE_MORE -> buildMore()
         }
     }
 
@@ -304,19 +326,18 @@ class MainActivity : Activity() {
         val statusCard = card()
         engineStatus = text("ENGINE / ${runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED")}", 12, COLOR_ACCENT, true, mono = true)
         discordStatus = text("GATEWAY / ${runtime.getString(PresenceEngineService.KEY_GATEWAY_STATE, "GATEWAY_DISCONNECTED")}", 12, COLOR_TEXT, true, mono = true)
-        statusMessage = text(runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Start the local engine, then connect the Discord Gateway.").orEmpty(), 12, COLOR_MUTED)
+        statusMessage = text(runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Turn on to start local detection and connect Discord.").orEmpty(), 12, COLOR_MUTED)
         statusCard.addView(engineStatus)
         statusCard.addView(discordStatus, marginTop(8))
         statusCard.addView(statusMessage, marginTop(12))
-        statusCard.addView(actionButton("START PRESENCE ENGINE", true) {
-            requestNotificationPermissionIfNeeded()
-            startServiceAction(PresenceEngineService.ACTION_START)
-        }, marginTop(16))
-        statusCard.addView(actionButton("STOP ENGINE", false) {
-            stopService(Intent(this, PresenceEngineService::class.java))
-            Toast.makeText(this, "Presence engine stopped", Toast.LENGTH_SHORT).show()
-            showPage(PAGE_DASHBOARD)
-        }, marginTop(8))
+        runtimeToggleButton = actionButton(runtimeToggleLabel(), true) {
+            toggleRuntime()
+        }.apply {
+            minHeight = dp(58)
+            textSize = 15f
+            letterSpacing = 0.08f
+        }
+        statusCard.addView(runtimeToggleButton, marginTop(16))
         statusCard.addView(actionButton("OPEN DEVELOPER CONSOLE", false) {
             showPage(PAGE_DEVELOPER)
         }, marginTop(8))
@@ -393,10 +414,6 @@ class MainActivity : Activity() {
                     showBrowserPicker()
                     return@addSwitch
                 }
-                if (settings.getBoolean(PresenceEngineService.KEY_AUTO_SOURCES_ENABLED, true)) {
-                    requestNotificationPermissionIfNeeded()
-                    startServiceAction(PresenceEngineService.ACTION_START)
-                }
                 openSystemSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             } else {
                 sendBroadcast(Intent(PresenceEngineService.ACTION_BROWSER_CLEAR)
@@ -433,71 +450,81 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(14), dp(14), dp(14))
             background = outline(COLOR_LINE, COLOR_DISCORD_CARD)
         }
-        val previewHeader = LinearLayout(this).apply {
+        val previewType = text("PLAYING", 10, COLOR_CYAN, true, mono = true)
+        val previewActivityRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val previewMark = TextView(this).apply {
-            text = "GP"
-            textSize = 13f
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            setTextColor(COLOR_BACKGROUND)
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                setColor(COLOR_ACCENT)
-                cornerRadius = dp(9).toFloat()
-            }
+        val previewArtworkStack = FrameLayout(this).apply {
+            background = outline(COLOR_CYAN, COLOR_PANEL)
+            clipToOutline = true
         }
-        previewHeader.addView(previewMark, LinearLayout.LayoutParams(dp(44), dp(44)))
-        val previewHeading = LinearLayout(this).apply {
+        val previewLargeArtwork = ImageView(this).apply {
+            contentDescription = "Large Discord artwork preview"
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setImageResource(android.R.drawable.ic_menu_gallery)
+        }
+        previewArtworkStack.addView(previewLargeArtwork, FrameLayout.LayoutParams(dp(104), dp(104)))
+        val previewSmallArtwork = ImageView(this).apply {
+            contentDescription = "Small Discord artwork overlay preview"
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setImageResource(android.R.drawable.ic_menu_gallery)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(COLOR_DISCORD_CARD)
+                setStroke(dp(2), COLOR_CYAN)
+            }
+            clipToOutline = true
+            visibility = View.GONE
+        }
+        previewArtworkStack.addView(
+            previewSmallArtwork,
+            FrameLayout.LayoutParams(dp(36), dp(36), Gravity.BOTTOM or Gravity.END).apply {
+                rightMargin = dp(3)
+                bottomMargin = dp(3)
+            },
+        )
+        previewActivityRow.addView(previewArtworkStack, LinearLayout.LayoutParams(dp(104), dp(104)))
+        val previewCopy = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, 0, 0)
         }
-        val previewType = text("PLAYING", 10, COLOR_MUTED, true, mono = true)
-        previewHeading.addView(previewType)
         val previewName = text("Playing Gecko Presence", 14, COLOR_TEXT, true)
-        previewHeading.addView(previewName, marginTop(3))
-        previewHeader.addView(previewHeading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        previewCard.addView(previewHeader)
-        val previewArtworkLabels = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        previewArtworkLabels.addView(text("LARGE IMAGE", 9, COLOR_MUTED, true, mono = true),
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        previewArtworkLabels.addView(text("SMALL IMAGE", 9, COLOR_MUTED, true, mono = true),
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        previewCard.addView(previewArtworkLabels, marginTop(14))
-        val previewArtworkRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val previewLargeArtwork = ImageView(this).apply {
-            contentDescription = "Large artwork preview"
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackground(outline(COLOR_LINE, COLOR_PANEL))
-            setImageResource(android.R.drawable.ic_menu_gallery)
-        }
-        val previewSmallArtwork = ImageView(this).apply {
-            contentDescription = "Small artwork preview"
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackground(outline(COLOR_LINE, COLOR_PANEL))
-            setImageResource(android.R.drawable.ic_menu_gallery)
-        }
-        previewArtworkRow.addView(previewLargeArtwork,
-            LinearLayout.LayoutParams(0, dp(112), 1f).apply { marginEnd = dp(5) })
-        previewArtworkRow.addView(previewSmallArtwork,
-            LinearLayout.LayoutParams(0, dp(112), 1f).apply { marginStart = dp(5) })
-        previewCard.addView(previewArtworkRow, marginTop(5))
-        val previewDetails = text("No details", 12, COLOR_TEXT)
-        previewCard.addView(previewDetails, marginTop(14))
+        previewCopy.addView(previewType)
+        previewCopy.addView(previewName, marginTop(5))
+        val previewDetails = text("No details", 12, COLOR_TEXT_SECONDARY)
+        previewCopy.addView(previewDetails, marginTop(4))
         val previewState = text("Android · Native", 11, COLOR_MUTED)
-        previewCard.addView(previewState, marginTop(5))
+        previewCopy.addView(previewState, marginTop(4))
+        previewActivityRow.addView(previewCopy, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        previewCard.addView(previewActivityRow, marginTop(12))
+        val previewTimestamp = text("STARTS NOW", 10, COLOR_MUTED, mono = true)
+        previewCard.addView(previewTimestamp, marginTop(12))
+        val previewButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val previewButtonOne = text("", 10, COLOR_TEXT, true).apply {
+            gravity = Gravity.CENTER
+            minHeight = dp(38)
+            background = outline(COLOR_CYAN, COLOR_DISCORD_CARD)
+            visibility = View.GONE
+        }
+        val previewButtonTwo = text("", 10, COLOR_TEXT, true).apply {
+            gravity = Gravity.CENTER
+            minHeight = dp(38)
+            background = outline(COLOR_CYAN, COLOR_DISCORD_CARD)
+            visibility = View.GONE
+        }
+        previewButtons.addView(previewButtonOne, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
+        previewButtons.addView(previewButtonTwo, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
+        previewCard.addView(previewButtons, marginTop(12))
         val previewAccountStatus = text("ACCOUNT · ONLINE", 10, COLOR_MUTED, true, mono = true)
-        previewCard.addView(previewAccountStatus, marginTop(10))
+        previewCard.addView(previewAccountStatus, marginTop(12))
         editor.addView(previewCard, marginTop(10))
 
         var updatePreview: () -> Unit = {}
+        var scheduleStudioSync: () -> Unit = {}
         val name = textField("Activity name", "studio_draft_name", "Gecko Presence", 80)
         val details = textField("Details", "studio_draft_details", "Working on something", 120)
         val state = textField("State", "studio_draft_state", "Android · Native", 120)
@@ -506,14 +533,14 @@ class MainActivity : Activity() {
             "studio_draft_type",
             listOf("Playing", "Streaming", "Listening", "Watching", "Custom Status", "Competing"),
             0,
-            onSelectionChanged = { updatePreview() },
+            onSelectionChanged = { updatePreview(); scheduleStudioSync() },
         )
         val accountStatus = optionSpinner(
             "Account status",
             "studio_draft_account_status_index",
             listOf("Online", "Idle", "Do Not Disturb", "Invisible", "Offline"),
             0,
-            onSelectionChanged = { updatePreview() },
+            onSelectionChanged = { updatePreview(); scheduleStudioSync() },
         )
         val uriInput = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         val streamUrl = textField("Twitch or YouTube URL (Streaming only)", "studio_draft_stream_url", "", 512, uriInput)
@@ -548,6 +575,13 @@ class MainActivity : Activity() {
             previewDetails.visibility = if (preview.details == null) View.GONE else View.VISIBLE
             previewState.text = preview.state.orEmpty()
             previewState.visibility = if (preview.state == null) View.GONE else View.VISIBLE
+            previewTimestamp.text = startsAt.text.toString().trim().takeIf(String::isNotEmpty)
+                ?.let { "STARTS · $it" } ?: "STARTS NOW"
+            previewButtonOne.text = button1Label.text.toString().trim()
+            previewButtonTwo.text = button2Label.text.toString().trim()
+            previewButtonOne.visibility = if (previewButtonOne.text.isNullOrBlank()) View.GONE else View.VISIBLE
+            previewButtonTwo.visibility = if (previewButtonTwo.text.isNullOrBlank()) View.GONE else View.VISIBLE
+            previewSmallArtwork.visibility = if (smallImage.text.toString().isBlank()) View.GONE else View.VISIBLE
             val accountLabel = when (accountStatus.selectedItemPosition) {
                 1 -> "IDLE"
                 2 -> "DND"
@@ -559,10 +593,16 @@ class MainActivity : Activity() {
             loadArtworkPreview(previewLargeArtwork, largeImage.text.toString())
             loadArtworkPreview(previewSmallArtwork, smallImage.text.toString())
         }
-        listOf(name, details, state, largeImage, smallImage).forEach { field ->
+        listOf(
+            name, details, state, streamUrl, largeImage, largeTooltip, smallImage, smallTooltip,
+            button1Label, button1Url, button2Label, button2Url, startsAt, endsAt,
+        ).forEach { field ->
             field.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = updatePreview()
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    updatePreview()
+                    scheduleStudioSync()
+                }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
@@ -599,27 +639,33 @@ class MainActivity : Activity() {
         editor.addView(text("DISCORD ACTIVITY DISPLAY", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
         editor.addView(text("Discord formats the headline by activity type: Playing/Listening/Watching/Competing use Activity name; Streaming uses Details; Custom Status uses State. The other fields remain separate activity metadata. The Application ID associates this activity with your registered Discord application and its assets.", 11, COLOR_MUTED), marginTop(5))
         editor.addView(text("TRANSPORT", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
-        editor.addView(text("Changes are sent through the Gateway publisher. External artwork URLs must be publicly reachable by Discord. Gallery uploads are intentionally not automatic.", 11, COLOR_MUTED), marginTop(5))
-        editor.addView(actionButton("APPLY MANUAL OVERRIDE", true) {
+        editor.addView(text("Once the manual override is active, field changes are validated and sent automatically after a short pause. External artwork URLs must be publicly reachable by Discord.", 11, COLOR_MUTED), marginTop(5))
+        val applyStudio: (Boolean) -> Boolean = applyStudio@{ showConfirmation ->
             val currentName = name.text.toString().trim()
             val currentDetails = details.text.toString().trim()
             val currentState = state.text.toString().trim().takeIf(String::isNotEmpty)
             if (currentName.isEmpty()) {
-                Toast.makeText(this, "Activity name is required", Toast.LENGTH_SHORT).show()
-                return@actionButton
+                if (showConfirmation) Toast.makeText(this, "Activity name is required", Toast.LENGTH_SHORT).show()
+                return@applyStudio false
             }
             val startRaw = startsAt.text.toString().trim()
             val startValue = startRaw.takeIf(String::isNotEmpty)?.toLongOrNull()
             if (startRaw.isNotEmpty() && startValue == null) {
-                Toast.makeText(this, "Start timestamp must be Unix seconds", Toast.LENGTH_LONG).show()
-                return@actionButton
+                if (showConfirmation) Toast.makeText(this, "Start timestamp must be Unix seconds", Toast.LENGTH_LONG).show()
+                return@applyStudio false
             }
-            val resolvedStart = startValue ?: (System.currentTimeMillis() / 1_000L)
+            val manualAlreadyActive = settings.getBoolean(PresenceEngineService.KEY_MANUAL_ACTIVE, false)
+            val existingStart = settings.getLong(PresenceEngineService.KEY_MANUAL_START, 0L)
+            val resolvedStart = startValue ?: if (manualAlreadyActive && existingStart > 0L) {
+                existingStart
+            } else {
+                System.currentTimeMillis() / 1_000L
+            }
             val endRaw = endsAt.text.toString().trim()
             val endValue = endRaw.takeIf(String::isNotEmpty)?.toLongOrNull()
             if (endRaw.isNotEmpty() && endValue == null) {
-                Toast.makeText(this, "End timestamp must be Unix seconds", Toast.LENGTH_LONG).show()
-                return@actionButton
+                if (showConfirmation) Toast.makeText(this, "End timestamp must be Unix seconds", Toast.LENGTH_LONG).show()
+                return@applyStudio false
             }
             fun assetFrom(image: EditText, tooltip: EditText): app.geckopresence.host.core.PresenceAsset? {
                 val reference = image.text.toString().trim().takeIf(String::isNotEmpty) ?: return null
@@ -652,8 +698,8 @@ class MainActivity : Activity() {
             )
             val validationErrors = candidate.validate()
             if (validationErrors.isNotEmpty()) {
-                Toast.makeText(this, validationErrors.first(), Toast.LENGTH_LONG).show()
-                return@actionButton
+                if (showConfirmation) Toast.makeText(this, validationErrors.first(), Toast.LENGTH_LONG).show()
+                return@applyStudio false
             }
             val accountStatuses = listOf("online", "idle", "dnd", "invisible", "offline")
             val selectedStatus = accountStatuses.getOrElse(accountStatus.selectedItemPosition) { "online" }
@@ -676,17 +722,43 @@ class MainActivity : Activity() {
                 .putString(PresenceEngineService.KEY_MANUAL_BUTTON2_URL, button2Url.text.toString().trim())
                 .putString(PresenceEngineService.KEY_PRESENCE_STATUS, selectedStatus)
                 .apply()
-            startServiceAction(PresenceEngineService.ACTION_START)
-            startServiceAction(PresenceEngineService.ACTION_APPLY_MANUAL)
-            Toast.makeText(this, "Manual Rich Presence applied", Toast.LENGTH_SHORT).show()
-        }, marginTop(16))
+            val engineRunning = runtime.getString(
+                PresenceEngineService.KEY_ENGINE_STATE,
+                PresenceEngineService.STATE_STOPPED,
+            ) == PresenceEngineService.STATE_RUNNING
+            if (engineRunning) {
+                startServiceAction(PresenceEngineService.ACTION_APPLY_MANUAL)
+            } else if (showConfirmation) {
+                Toast.makeText(this, "Presence saved. Press TURN ON on Home to publish it.", Toast.LENGTH_LONG).show()
+            }
+            if (showConfirmation && engineRunning) Toast.makeText(this, "Manual Rich Presence applied", Toast.LENGTH_SHORT).show()
+            true
+        }
+        val studioSyncHandler = Handler(Looper.getMainLooper())
+        val studioSyncTask = Runnable {
+            if (settings.getBoolean(PresenceEngineService.KEY_MANUAL_ACTIVE, false)) {
+                applyStudio(false)
+            }
+        }
+        scheduleStudioSync = {
+            if (settings.getBoolean(PresenceEngineService.KEY_MANUAL_ACTIVE, false)) {
+                studioSyncHandler.removeCallbacks(studioSyncTask)
+                studioSyncHandler.postDelayed(studioSyncTask, STUDIO_SYNC_DEBOUNCE_MS)
+            }
+        }
+        editor.addView(actionButton("APPLY MANUAL OVERRIDE", true) { applyStudio(true) }, marginTop(16))
         editor.addView(actionButton("RELEASE MANUAL OVERRIDE", false) {
-            startServiceAction(PresenceEngineService.ACTION_CLEAR_MANUAL)
-            Toast.makeText(this, "Automatic sources can take priority again", Toast.LENGTH_SHORT).show()
+            studioSyncHandler.removeCallbacks(studioSyncTask)
+            settings.edit().putBoolean(PresenceEngineService.KEY_MANUAL_ACTIVE, false).remove(PresenceEngineService.KEY_MANUAL_START).apply()
+            if (runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, PresenceEngineService.STATE_STOPPED) == PresenceEngineService.STATE_RUNNING) {
+                startServiceAction(PresenceEngineService.ACTION_CLEAR_MANUAL)
+            }
+            Toast.makeText(this, "Manual override released", Toast.LENGTH_SHORT).show()
         }, marginTop(8))
         editor.addView(actionButton("SAVE TO LIBRARY", false) { showSavePresetDialog(name.text.toString(), details.text.toString(), state.text.toString()) }, marginTop(8))
         pageContent.addView(editor)
         updatePreview()
+        scheduleStudioSync()
         buildAppProfileEditor()
     }
 
@@ -864,7 +936,7 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Could not save this app profile", Toast.LENGTH_LONG).show()
                 return@actionButton
             }
-            startServiceAction(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+            updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
             Toast.makeText(this, "Advanced profile saved for ${selectedApp.label}", Toast.LENGTH_SHORT).show()
             showPage(PAGE_STUDIO)
         }, marginTop(16))
@@ -874,7 +946,7 @@ class MainActivity : Activity() {
             listOf("label", "details", "state", "type", "streamUrl", "largeImage", "largeTooltip", "smallImage", "smallTooltip", "button1Label", "button1Url", "button2Label", "button2Url", "startedAt", "endsAt", "priority", "accountStatus").forEach {
                 settings.edit().remove(appProfileDraftKey(selectedPackage, it)).apply()
             }
-            startServiceAction(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+            updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
             Toast.makeText(this, "Default profile restored for ${selectedApp.label}", Toast.LENGTH_SHORT).show()
             showPage(PAGE_STUDIO)
         }, marginTop(8))
@@ -905,8 +977,8 @@ class MainActivity : Activity() {
         val rules = card()
         rules.addView(text("AUTOMATIC SOURCE ENGINE", 11, COLOR_ACCENT, true, mono = true))
         addSwitch(rules, "Allow automatic source detection", PresenceEngineService.KEY_AUTO_SOURCES_ENABLED, true) { enabled ->
-            startServiceAction(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
-            startServiceAction(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+            updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+            updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
             if (!enabled) {
                 sendBroadcast(Intent(PresenceEngineService.ACTION_BROWSER_CLEAR)
                     .setPackage(packageName)
@@ -1024,20 +1096,10 @@ class MainActivity : Activity() {
         runtimeCard.addView(developerEngineStatus, marginTop(8))
         runtimeCard.addView(developerRpcStatus, marginTop(5))
         runtimeCard.addView(developerMessage, marginTop(10))
-        runtimeCard.addView(actionButton("START LOCAL ENGINE", true) {
-            requestNotificationPermissionIfNeeded()
-            startServiceAction(PresenceEngineService.ACTION_START)
-        }, marginTop(14))
-        runtimeCard.addView(actionButton("CONNECT DISCORD GATEWAY", true) {
-            requestNotificationPermissionIfNeeded()
-            startServiceAction(PresenceEngineService.ACTION_CONNECT_DISCORD)
-        }, marginTop(8))
-        runtimeCard.addView(actionButton("DISCONNECT DISCORD GATEWAY", false) {
-            startServiceAction(PresenceEngineService.ACTION_DISCONNECT_DISCORD)
-        }, marginTop(8))
-        runtimeCard.addView(actionButton("STOP LOCAL ENGINE", false) {
-            startServiceAction(PresenceEngineService.ACTION_STOP)
-        }, marginTop(8))
+        runtimeCard.addView(
+            text("Runtime is controlled from Home with one Turn On / Turn Off control. This console is diagnostics-only so the engine and Gateway cannot drift into separate states.", 11, COLOR_MUTED),
+            marginTop(12),
+        )
         pageContent.addView(runtimeCard)
 
         val activityCard = card()
@@ -1103,28 +1165,12 @@ class MainActivity : Activity() {
         renderDeveloperStatus()
     }
 
-    private fun buildMore() {
-        pageContent.addView(sectionTitle("MORE", "Configuration and local data"))
-        val routes = listOf(
-            Triple("AUTOMATION", "Source priorities and global detection rules", PAGE_AUTOMATION),
-            Triple("LIBRARY", "Saved local activity presets", PAGE_LIBRARY),
-            Triple("SETTINGS", "Privacy, Android permissions and diagnostics", PAGE_SETTINGS),
-        )
-        routes.forEach { (label, description, destination) ->
-            val entry = card()
-            entry.addView(text(label, 12, COLOR_ACCENT, true, mono = true))
-            entry.addView(text(description, 11, COLOR_MUTED), marginTop(5))
-            entry.addView(actionButton("OPEN $label", false) { showPage(destination) }, marginTop(10))
-            pageContent.addView(entry, marginTop(10))
-        }
-    }
-
     private fun buildArtworkUploadSettings() {
         val card = card()
         card.addView(text("ARTWORK HOSTING", 11, COLOR_ACCENT, true, mono = true))
         card.addView(
             text(
-                "Gallery files stay in Gecko's private storage until you explicitly upload one. Uploading uses Imgur anonymous image hosting; uploaded images are publicly reachable. Register your own Imgur application and enter its Client-ID below. Gecko does not need your Imgur account password or Client Secret.",
+                "Gallery files stay private by default. You can approve one upload at a time or enable standing consent for automatic detected-artwork uploads. Imgur uploads are public to anyone with the URL. Register your own Imgur application and enter its Client-ID below; Gecko does not need your account password or Client Secret.",
                 11, COLOR_MUTED,
             ),
             marginTop(7),
@@ -1148,13 +1194,76 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Client-ID format is invalid", Toast.LENGTH_SHORT).show()
                 return@actionButton
             }
+            val automaticHostingWasEnabled = settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)
             settings.edit().putString(KEY_IMGUR_CLIENT_ID, value).apply()
-            Toast.makeText(this, if (value.isEmpty()) "Imgur hosting disabled" else "Imgur Client-ID saved on this device", Toast.LENGTH_SHORT).show()
-            if (value.isNotEmpty()) resumePendingArtworkUpload()
+            if (value.isEmpty() && automaticHostingWasEnabled) {
+                settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false).apply()
+                updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+                Toast.makeText(this, "Imgur Client-ID removed · automatic public upload disabled", Toast.LENGTH_LONG).show()
+                showPage(PAGE_SETTINGS)
+            } else {
+                Toast.makeText(this, if (value.isEmpty()) "Imgur hosting disabled" else "Imgur Client-ID saved on this device", Toast.LENGTH_SHORT).show()
+                if (value.isNotEmpty()) {
+                    resumePendingArtworkUpload()
+                    if (automaticHostingWasEnabled) {
+                        updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                        updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+                    }
+                }
+            }
         }, marginTop(8))
         card.addView(actionButton("OPEN IMGUR APP REGISTRATION", false) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.imgur.com/oauth2/addclient")))
         }, marginTop(8))
+
+        card.addView(divider(), marginTop(16))
+        card.addView(text("ONE-TIME PUBLIC UPLOAD CONSENT", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
+        card.addView(
+            text(
+                "When enabled, Gecko may automatically upload detected media covers, selected-app icons and Studio artwork you newly choose to Imgur. Uploaded files are public to anyone with their URL. The local Gallery remains private. You can revoke this standing consent at any time.",
+                11, COLOR_MUTED,
+            ),
+            marginTop(6),
+        )
+        val autoUpload = Switch(this).apply {
+            text = "Automatically host detected artwork publicly"
+            textSize = 13f
+            setTextColor(COLOR_TEXT)
+            minHeight = dp(52)
+            isChecked = settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)
+        }
+        autoUpload.setOnCheckedChangeListener { button, checked ->
+            if (!checked) {
+                settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false).apply()
+                if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
+                    updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                    updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+                }
+                return@setOnCheckedChangeListener
+            }
+            val savedClientId = settings.getString(KEY_IMGUR_CLIENT_ID, "").orEmpty()
+            if (!app.geckopresence.host.core.ArtworkMediaPolicy.isValidClientId(savedClientId)) {
+                Toast.makeText(this, "Save a valid Imgur Client-ID before enabling automatic public uploads", Toast.LENGTH_LONG).show()
+                button.isChecked = false
+                return@setOnCheckedChangeListener
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Allow automatic public uploads?")
+                .setMessage("This is standing consent, not a per-image prompt. Gecko will send newly detected media covers, selected-app icons and Studio artwork you choose to Imgur automatically. Anyone with an uploaded image URL may view that image. Your Discord session and Imgur Client Secret are not sent. Enable this only if you accept public hosting.")
+                .setNegativeButton("CANCEL") { _, _ -> button.isChecked = false }
+                .setPositiveButton("ENABLE PUBLIC UPLOADS") { _, _ ->
+                    settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, true).apply()
+                    if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
+                        updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                        updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+                    }
+                    Toast.makeText(this, "Standing public-upload consent enabled", Toast.LENGTH_SHORT).show()
+                }
+                .setOnCancelListener { button.isChecked = false }
+                .show()
+        }
+        card.addView(autoUpload, marginTop(4))
         pageContent.addView(card, marginTop(12))
     }
 
@@ -1162,7 +1271,7 @@ class MainActivity : Activity() {
         val items = ArtworkGalleryStore.list(this)
         val gallery = card()
         gallery.addView(text("ARTWORK GALLERY · PRIVATE LOCAL FILES", 11, COLOR_ACCENT, true, mono = true))
-        gallery.addView(text("Choose an image from your device in Studio. A selected image is copied into app-private storage. Only uploaded images have a URL that Discord can retrieve.", 11, COLOR_MUTED), marginTop(6))
+        gallery.addView(text("Choose an image from Studio. Files stay in app-private storage until a per-image approval or your standing public-upload consent allows an Imgur upload.", 11, COLOR_MUTED), marginTop(6))
         gallery.addView(text("${items.size} / 40 images · 64 MiB storage limit", 10, COLOR_MUTED, mono = true), marginTop(8))
         if (items.isEmpty()) {
             gallery.addView(text("No artwork stored yet.", 11, COLOR_MUTED), marginTop(8))
@@ -1294,6 +1403,10 @@ class MainActivity : Activity() {
                 .show()
             return
         }
+        if (settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)) {
+            uploadArtwork(artwork, clientId, requireStandingConsent = true)
+            return
+        }
         AlertDialog.Builder(this)
             .setTitle("Upload artwork publicly?")
             .setMessage("Gecko will upload '${artwork.displayName}' (${artwork.byteCount / 1024} KiB) to Imgur using anonymous hosting. Anyone with the resulting URL may view it. The local copy remains on this device. Continue?")
@@ -1302,17 +1415,25 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun uploadArtwork(artwork: ArtworkGalleryStore.Artwork, clientId: String) {
+    private fun uploadArtwork(
+        artwork: ArtworkGalleryStore.Artwork,
+        clientId: String,
+        requireStandingConsent: Boolean = false,
+    ) {
         if (artworkUploadInProgress || artworkImportInProgress) return
         artworkUploadInProgress = true
         settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
         Toast.makeText(this, "Uploading artwork to Imgur…", Toast.LENGTH_SHORT).show()
         Thread({
-            val file = ArtworkGalleryStore.file(this, artwork)
-            val result = if (file == null) {
-                ImgurAnonymousUploader.Result.Failure("Local artwork file is missing or failed its integrity check.")
-            } else {
-                ImgurAnonymousUploader.upload(file, clientId)
+            val consentStillEnabled = !requireStandingConsent || settings.getBoolean(
+                ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD,
+                false,
+            )
+            val file = if (consentStillEnabled) ArtworkGalleryStore.file(this, artwork) else null
+            val result = when {
+                !consentStillEnabled -> ImgurAnonymousUploader.Result.Failure("Automatic public-upload consent was revoked before upload started.")
+                file == null -> ImgurAnonymousUploader.Result.Failure("Local artwork file is missing or failed its integrity check.")
+                else -> ImgurAnonymousUploader.upload(file, clientId)
             }
             val metadataSaved = if (result is ImgurAnonymousUploader.Result.Success) {
                 ArtworkGalleryStore.markUploaded(this, artwork.id, result.directUrl)
@@ -1429,7 +1550,7 @@ class MainActivity : Activity() {
         privacy.addView(text("PRIVACY", 11, COLOR_ACCENT, true, mono = true))
         if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
             addSwitch(privacy, "Share track / video titles", MediaSessionPresenceTracker.KEY_SHARE_MEDIA_TITLES, false) {
-                startServiceAction(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+                updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
             }
             privacy.addView(text("Disabled by default. When enabled, titles and artist names from active media sessions may appear in your Discord activity. Notification contents and browser page content are not collected.", 11, COLOR_MUTED), marginTop(6))
             privacy.addView(text("Browser mode stores only the hostname from the visible browser address field. It excludes known sensitive hosts and expires stale candidates.", 11, COLOR_MUTED), marginTop(10))
@@ -1454,6 +1575,15 @@ class MainActivity : Activity() {
         diagnostics.addView(text("Engine: ${runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED")}\nDiscord Gateway: ${runtime.getString(PresenceEngineService.KEY_GATEWAY_STATE, "GATEWAY_DISCONNECTED")}\nApp source: ${runtime.getString(PresenceEngineService.KEY_APP_TRACKER_STATUS, "unknown")}\nMedia source: ${runtime.getString(PresenceEngineService.KEY_MEDIA_TRACKER_STATUS, "unknown")}\nApplication ID: ${BuildConfig.DISCORD_APP_ID}", 11, COLOR_TEXT, mono = true), marginTop(8))
         diagnostics.addView(actionButton("COPY REDACTED DIAGNOSTICS", false) { copyDiagnostics() }, marginTop(10))
         pageContent.addView(diagnostics, marginTop(12))
+
+        val tools = card()
+        tools.addView(text("MORE CONTROLS", 11, COLOR_ACCENT, true, mono = true))
+        tools.addView(text("Source priorities and deep runtime diagnostics live here, away from the primary Turn On / Turn Off action.", 11, COLOR_MUTED), marginTop(6))
+        if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
+            tools.addView(actionButton("SOURCE AUTOMATION & PRIORITIES", false) { showPage(PAGE_AUTOMATION) }, marginTop(10))
+        }
+        tools.addView(actionButton("DEVELOPER CONSOLE", false) { showPage(PAGE_DEVELOPER) }, marginTop(8))
+        pageContent.addView(tools, marginTop(12))
     }
 
 
@@ -1470,7 +1600,7 @@ class MainActivity : Activity() {
         )
         credentialCard.addView(
             text(
-                "This is not OAuth2. Sign in to your own Discord account in an isolated WebView, then press Import; Gecko reads the session from Discord's page storage only on that press and stores it encrypted with Android Keystore. It is a full account bearer secret. After saving, connect the Gateway from Developer Console.",
+                "This is not OAuth2. Sign in to your own Discord account in an isolated WebView, then press Import; Gecko reads the session from Discord's page storage only on that press and stores it encrypted with Android Keystore. It is a full account bearer secret. After saving, return Home and press Turn On to start the engine and connect the Gateway together.",
                 11, COLOR_MUTED,
             ),
             marginTop(8),
@@ -1657,7 +1787,6 @@ class MainActivity : Activity() {
                 sendBroadcast(Intent(BrowserAccessibilityService.ACTION_RECONFIGURE).setPackage(packageName), PresenceEngineService.INTERNAL_BROADCAST_PERMISSION)
                 if (settings.getBoolean(BrowserAccessibilityService.KEY_TRACK_BROWSER, false) &&
                     settings.getBoolean(PresenceEngineService.KEY_AUTO_SOURCES_ENABLED, true)) {
-                    startServiceAction(PresenceEngineService.ACTION_START)
                     openSystemSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                 }
                 Toast.makeText(this, "Browser allowlist saved", Toast.LENGTH_SHORT).show()
@@ -1781,6 +1910,8 @@ class MainActivity : Activity() {
             if (::currentActivity.isInitialized && !preview.isNullOrBlank()) currentActivity.text = preview
             if (::appSourceStatus.isInitialized) appSourceStatus.text = intent.getStringExtra(PresenceEngineService.EXTRA_APP_TRACKING_STATUS).orEmpty()
             if (::mediaSourceStatus.isInitialized) mediaSourceStatus.text = intent.getStringExtra(PresenceEngineService.EXTRA_MEDIA_TRACKING_STATUS).orEmpty()
+            updateRuntimeToggle()
+            updateRuntimeStatusColors(engine, gateway)
         }
         if (activePage == PAGE_DEVELOPER) renderDeveloperStatus(intent)
     }
@@ -1801,10 +1932,62 @@ class MainActivity : Activity() {
     private fun renderDashboardStatus() {
         engineStatus.text = "ENGINE / ${runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, "STOPPED")}" 
         discordStatus.text = "GATEWAY / ${runtime.getString(PresenceEngineService.KEY_GATEWAY_STATE, "GATEWAY_DISCONNECTED")}" 
-        statusMessage.text = runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Start the local engine, then connect the Discord Gateway.").orEmpty()
+        statusMessage.text = runtime.getString(PresenceEngineService.KEY_STATUS_MESSAGE, "Press TURN ON to start local detection and connect Discord together.").orEmpty()
         currentActivity.text = runtime.getString(PresenceEngineService.KEY_PRESENCE_PREVIEW, "No active source").orEmpty()
         appSourceStatus.text = runtime.getString(PresenceEngineService.KEY_APP_TRACKER_STATUS, "App detector not started").orEmpty()
         mediaSourceStatus.text = runtime.getString(PresenceEngineService.KEY_MEDIA_TRACKER_STATUS, "Media detector not started").orEmpty()
+        updateRuntimeToggle()
+        updateRuntimeStatusColors(
+            runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, PresenceEngineService.STATE_STOPPED),
+            runtime.getString(PresenceEngineService.KEY_GATEWAY_STATE, DiscordGatewayPublisher.STATE_DISCONNECTED),
+        )
+    }
+
+    private fun updateRuntimeStatusColors(engine: String?, gateway: String?) {
+        if (::engineStatus.isInitialized) engineStatus.setTextColor(
+            if (engine == PresenceEngineService.STATE_RUNNING) COLOR_GREEN else COLOR_MUTED,
+        )
+        if (::discordStatus.isInitialized) discordStatus.setTextColor(
+            when (gateway) {
+                DiscordGatewayPublisher.STATE_CONNECTED -> COLOR_CYAN
+                DiscordGatewayPublisher.STATE_ERROR -> COLOR_MAGENTA
+                else -> COLOR_MUTED
+            },
+        )
+    }
+
+    private fun runtimeIsOn(): Boolean = RuntimeTogglePolicy.isOn(
+        runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, PresenceEngineService.STATE_STOPPED),
+    )
+
+    private fun runtimeToggleLabel(): String = if (runtimeIsOn()) "TURN OFF" else "TURN ON"
+
+    private fun updateRuntimeToggle() {
+        val on = runtimeIsOn()
+        runtimeToggleButton?.apply {
+            text = if (on) "TURN OFF" else "TURN ON"
+            background = outline(if (on) COLOR_MAGENTA else COLOR_ACCENT, if (on) COLOR_MAGENTA else COLOR_ACCENT)
+            setTextColor(COLOR_BACKGROUND)
+        }
+    }
+
+    private fun toggleRuntime() {
+        if (runtimeIsOn()) {
+            stopService(Intent(this, PresenceEngineService::class.java))
+            Toast.makeText(this, "Turning Gecko off…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!DiscordCredentialVault.hasCredential(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Discord connection is not configured")
+                .setMessage("Sign in from Settings first. Turn On will then start the local engine and connect the Discord Gateway together.")
+                .setNegativeButton("NOT NOW", null)
+                .setPositiveButton("OPEN SETTINGS") { _, _ -> showPage(PAGE_SETTINGS) }
+                .show()
+            return
+        }
+        requestNotificationPermissionIfNeeded()
+        startServiceAction(PresenceEngineService.ACTION_TURN_ON)
     }
 
     private fun accessibilityServiceStatus(): String {
@@ -1821,6 +2004,7 @@ class MainActivity : Activity() {
 
     private fun updateSources(action: String) {
         if (!settings.getBoolean(PresenceEngineService.KEY_AUTO_SOURCES_ENABLED, true)) return
+        if (runtime.getString(PresenceEngineService.KEY_ENGINE_STATE, PresenceEngineService.STATE_STOPPED) != PresenceEngineService.STATE_RUNNING) return
         startServiceAction(action)
     }
 
@@ -1850,7 +2034,13 @@ class MainActivity : Activity() {
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(14), dp(14), dp(14), dp(14))
-        background = outline(COLOR_LINE, COLOR_PANEL)
+        background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(COLOR_GLASS_TOP, COLOR_PANEL),
+        ).apply {
+            setStroke(dp(1), COLOR_LINE)
+            cornerRadius = dp(9).toFloat()
+        }
     }
 
     private fun text(
@@ -1890,7 +2080,7 @@ class MainActivity : Activity() {
     private fun outline(stroke: Int, fill: Int = COLOR_PANEL): GradientDrawable = GradientDrawable().apply {
         setColor(fill)
         setStroke(dp(1), stroke)
-        cornerRadius = 0f
+        cornerRadius = dp(9).toFloat()
     }
 
     private fun marginTop(value: Int): LinearLayout.LayoutParams = LinearLayout.LayoutParams(
@@ -1908,7 +2098,6 @@ class MainActivity : Activity() {
         private const val PAGE_LIBRARY = "Library"
         private const val PAGE_SETTINGS = "Settings"
         private const val PAGE_DEVELOPER = "Developer"
-        private const val PAGE_MORE = "More"
         private const val PREFS_SETTINGS = "gpb_settings"
         private const val PREFS_RUNTIME = "gpb_runtime"
         private const val KEY_STUDIO_DRAFT_NAME = "studio_draft_name"
@@ -1924,6 +2113,7 @@ class MainActivity : Activity() {
         private const val REQUEST_DISCORD_SESSION_IMPORT = 4403
         private const val REQUEST_ARTWORK_PICKER = 4404
         private const val KEY_IMGUR_CLIENT_ID = "artwork_imgur_client_id"
+        private const val STUDIO_SYNC_DEBOUNCE_MS = 700L
         private const val TAG = "GeckoPresenceUI"
 
     }

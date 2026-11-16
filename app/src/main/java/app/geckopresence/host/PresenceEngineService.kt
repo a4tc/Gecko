@@ -115,7 +115,7 @@ class PresenceEngineService : Service() {
                 }
             }
             engineState = STATE_RUNNING
-            lastStatusMessage = "Local engine ready. Discord Gateway is disconnected; connect it from Developer."
+            lastStatusMessage = "Local engine ready. Discord Gateway will connect from the Home Turn On action."
             restoreManualPresence()
             updateAppTracking()
             updateMediaTracking()
@@ -363,7 +363,32 @@ class PresenceEngineService : Service() {
 
     private fun handleForegroundPackageChanged(packageName: String?) {
         val update = packageName?.let { AppPresencePolicy.buildUpdate(this, it) }
-        if (update == null) clearSourceType(SOURCE_ANDROID_APP) else handleIncomingPresence(update)
+        if (update == null) {
+            clearSourceType(SOURCE_ANDROID_APP)
+            return
+        }
+
+        handleIncomingPresence(update)
+        if (update.largeImage != null) return
+        val settings = getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE)
+        if (!settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)) return
+
+        ArtworkAutoPublisher.resolveApplicationIcon(this, packageName.orEmpty(), update.name) { asset, artworkStatus ->
+            mainHandler.post {
+                if (engineState != STATE_RUNNING || asset == null) {
+                    artworkStatus?.let(::recordEvent)
+                    return@post
+                }
+                val current = synchronized(presenceLock) { presenceCandidates[update.source] }
+                if (current != null && current.sourceType == SOURCE_ANDROID_APP &&
+                    current.name == update.name && current.details == update.details &&
+                    current.startTimestampSeconds == update.startTimestampSeconds && current.largeImage == null
+                ) {
+                    handleIncomingPresence(current.copy(largeImage = asset))
+                    recordEvent("Application artwork resolved for ${update.name}")
+                }
+            }
+        }
     }
 
     private fun restoreManualPresence() {
@@ -573,6 +598,7 @@ class PresenceEngineService : Service() {
         const val ACTION_BROWSER_PRESENCE = "app.geckopresence.host.action.BROWSER_PRESENCE"
         const val ACTION_BROWSER_CLEAR = "app.geckopresence.host.action.BROWSER_CLEAR"
         const val ACTION_STOP = "app.geckopresence.host.action.STOP"
+        const val ACTION_TURN_ON = RpcStartupPolicy.ACTION_TURN_ON
         const val ACTION_CONNECT_DISCORD = RpcStartupPolicy.ACTION_CONNECT_DISCORD
         const val ACTION_DISCONNECT_DISCORD = RpcStartupPolicy.ACTION_DISCONNECT_DISCORD
         const val ACTION_STATUS_CHANGED = "app.geckopresence.host.action.STATUS_CHANGED"

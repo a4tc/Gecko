@@ -11,7 +11,7 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Private local artwork library. Gallery files are never uploaded unless the user confirms. */
+/** Private local artwork library. Public upload is handled separately and requires explicit standing consent or per-image approval. */
 object ArtworkGalleryStore {
     const val MAX_FILE_BYTES = ArtworkMediaPolicy.MAX_FILE_BYTES
     private const val MAX_ITEMS = ArtworkMediaPolicy.MAX_ITEMS
@@ -41,17 +41,6 @@ object ArtworkGalleryStore {
         if (!uri.scheme.equals("content", ignoreCase = true)) {
             return ImportResult.Rejected("The document provider returned an unsupported URI.")
         }
-        val directory = galleryDirectory(app).apply { mkdirs() }
-        val privateRoot = app.filesDir.canonicalFile
-        val canonicalDirectory = directory.canonicalFile
-        if (canonicalDirectory.parentFile != privateRoot) {
-            return ImportResult.Rejected("Private artwork storage path failed validation.")
-        }
-        val current = list(app)
-        val localFiles = canonicalDirectory.listFiles().orEmpty().filter { candidate ->
-            runCatching { candidate.isFile && candidate.canonicalFile.parentFile == canonicalDirectory }.getOrDefault(false)
-        }
-        if (localFiles.size >= MAX_ITEMS) return ImportResult.Rejected("Gallery is full (maximum $MAX_ITEMS images).")
         val bytes = try {
             app.contentResolver.openInputStream(uri)?.use { input ->
                 val output = java.io.ByteArrayOutputStream()
@@ -69,7 +58,25 @@ object ArtworkGalleryStore {
         } catch (_: Exception) {
             return ImportResult.Rejected("The selected image could not be read.")
         }
-        val detected = ArtworkMediaPolicy.detectImage(bytes) ?: return ImportResult.Rejected("Only JPEG, PNG, and WebP images are supported.")
+        return importBytes(app, bytes, queryDisplayName(app, uri))
+    }
+
+    private fun importBytes(context: Context, bytes: ByteArray, requestedDisplayName: String): ImportResult {
+        val app = context.applicationContext
+        val directory = galleryDirectory(app).apply { mkdirs() }
+        val privateRoot = app.filesDir.canonicalFile
+        val canonicalDirectory = directory.canonicalFile
+        if (canonicalDirectory.parentFile != privateRoot) {
+            return ImportResult.Rejected("Private artwork storage path failed validation.")
+        }
+        val current = list(app)
+        val localFiles = canonicalDirectory.listFiles().orEmpty().filter { candidate ->
+            runCatching { candidate.isFile && candidate.canonicalFile.parentFile == canonicalDirectory }.getOrDefault(false)
+        }
+        if (localFiles.size >= MAX_ITEMS) return ImportResult.Rejected("Gallery is full (maximum $MAX_ITEMS images).")
+        if (bytes.isEmpty() || bytes.size > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 8 MiB limit.")
+        val detected = ArtworkMediaPolicy.detectImage(bytes)
+            ?: return ImportResult.Rejected("Only JPEG, PNG, and WebP images are supported.")
         val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, dimensions)
         val width = dimensions.outWidth
@@ -91,7 +98,9 @@ object ArtworkGalleryStore {
             destination.delete()
             return ImportResult.Rejected("Could not save the image in Gecko's private storage.")
         }
-        val displayName = queryDisplayName(app, uri).take(80).ifBlank { "Artwork ${current.size + 1}" }
+        val displayName = requestedDisplayName.take(80)
+            .replace(Regex("[\\p{Cntrl}/\\\\]"), "_")
+            .ifBlank { "Artwork ${current.size + 1}" }
         val artwork = Artwork(id, displayName, fileName, detected.mimeType, bytes.size.toLong(), digest, null, System.currentTimeMillis())
         val saved = preferences(app).edit().putString(PREFIX + id, artwork.toJson().toString()).commit()
         if (!saved) {
