@@ -125,7 +125,11 @@ async function readBoundedBody(request: Request): Promise<Uint8Array> {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  // Copy into a dedicated ArrayBuffer for Web Crypto compatibility.
+  const digestInput = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(digestInput).set(bytes);
+
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
 }
 

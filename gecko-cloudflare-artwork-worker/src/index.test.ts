@@ -35,7 +35,7 @@ describe("Gecko artwork Worker", () => {
 
     expect(response.status).toBe(201);
     expect(data.success).toBe(true);
-    expect(data.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.sha256).toBe("f7f920c005e0b957def68400fa236ef5160460f5ee8a00b7d5ed4ac21b015d27");
     expect(data.key).toBe(`artwork/${data.sha256}.png`);
     expect(data.url).toBe(`${ASSET_BASE}/${data.key}`);
     expect(data.size).toBe(bytes.length);
