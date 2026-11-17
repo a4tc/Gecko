@@ -61,6 +61,17 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install and test Cloudflare artwork Worker
+        working-directory: gecko-cloudflare-artwork-worker
+        run: |
+          npm install --no-audit --no-fund --include=dev
+          npm test
+          npm run typecheck
+
       - name: Run pure Kotlin source and security checks
         run: |
           bash scripts/test-core.sh
