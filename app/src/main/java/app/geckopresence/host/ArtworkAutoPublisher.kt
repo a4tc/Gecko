@@ -10,6 +10,7 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.net.Uri
 import app.geckopresence.host.core.ArtworkMediaPolicy
+import app.geckopresence.host.core.ArtworkUploadPolicy
 import app.geckopresence.host.core.PresenceAsset
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -19,8 +20,7 @@ import java.util.concurrent.Executors
 
 /** Resolves app/media artwork and publishes it only after the user enables standing public-upload consent. */
 object ArtworkAutoPublisher {
-    const val KEY_AUTO_PUBLIC_UPLOAD = "artwork_auto_public_upload"
-    const val KEY_IMGUR_CLIENT_ID = "artwork_imgur_client_id"
+    const val KEY_AUTO_PUBLIC_UPLOAD = "artwork_auto_public_upload_cloudflare_v1"
     private const val PREFS_SETTINGS = "gpb_settings"
     private const val PREFS_AUTO_CACHE = "gpb_artwork_auto_cache"
     private const val AUTO_CACHE_PREFIX = "auto:"
@@ -85,11 +85,12 @@ object ArtworkAutoPublisher {
         }
         if (!isStandingConsentEnabled(context)) return null to null
 
-        val settings = context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-        val clientId = settings.getString(KEY_IMGUR_CLIENT_ID, "").orEmpty().trim()
-        if (!ArtworkMediaPolicy.isValidClientId(clientId)) {
-            return null to "Automatic artwork upload is enabled · configure an Imgur Client-ID in Settings"
-        }
+        val config = ArtworkUploadConfigStore.load(context)
+            ?: return null to "Configure your artwork host before enabling automatic uploads"
+        val token = runCatching { ArtworkUploadCredentialVault.loadForUpload(context) }
+            .getOrNull()
+            ?.takeIf(ArtworkUploadPolicy::isValidUploadToken)
+            ?: return null to "Save a valid private artwork-host token before uploading"
 
         val boundedBitmap = downsample(bitmap, MAX_DECODE_EDGE)
         val encoded = try {
@@ -106,7 +107,7 @@ object ArtworkAutoPublisher {
         }
 
         val hash = ArtworkMediaPolicy.sha256(encoded)
-        cachedUrl(context, hash)?.let { return PresenceAsset(it, displayName.take(80)) to null }
+        cachedUrl(context, hash, config.assetBaseUrl)?.let { return PresenceAsset(it, displayName.take(80)) to null }
         if (!isStandingConsentEnabled(context)) {
             return null to "Public upload consent was revoked before artwork upload started"
         }
@@ -114,39 +115,46 @@ object ArtworkAutoPublisher {
         val stagedFile = stageTemporaryArtwork(context, hash, encoded)
             ?: return null to "Could not stage artwork in private temporary storage"
         val upload = try {
-            ImgurAnonymousUploader.upload(stagedFile, clientId)
+            CloudflareArtworkUploader.upload(stagedFile, config, token)
         } finally {
             stagedFile.delete()
         }
         return when (upload) {
-            is ImgurAnonymousUploader.Result.Success -> {
+            is CloudflareArtworkUploader.Result.Success -> {
+                val url = upload.directUrl
                 if (!isStandingConsentEnabled(context)) {
                     null to "Public-upload consent was revoked during upload; future uploads are disabled"
-                } else if (!cacheUrl(context, hash, upload.directUrl)) {
+                } else if (url.isNullOrBlank() || !cacheUrl(context, hash, config.assetBaseUrl, url)) {
                     null to "Artwork uploaded but its local URL cache could not be updated"
                 } else {
-                    PresenceAsset(upload.directUrl, displayName.take(80)) to null
+                    PresenceAsset(url, displayName.take(80)) to null
                 }
             }
-            is ImgurAnonymousUploader.Result.Failure -> null to upload.message
+            is CloudflareArtworkUploader.Result.Failure -> null to upload.message
         }
     }
 
-    private fun cachedUrl(context: Context, hash: String): String? {
+    private fun cachedUrl(context: Context, hash: String, assetBaseUrl: String): String? {
         if (!Regex("^[a-f0-9]{64}$").matches(hash)) return null
         val prefs = context.getSharedPreferences(PREFS_AUTO_CACHE, Context.MODE_PRIVATE)
         val key = AUTO_CACHE_PREFIX + hash
         val raw = prefs.getString(key, null) ?: return null
         val url = runCatching { JSONObject(raw).optString("url") }.getOrNull()
-        if (url.isNullOrBlank() || !ArtworkMediaPolicy.isSafeImgurUrl(url)) {
+        if (url.isNullOrBlank() ||
+            !ArtworkUploadPolicy.isSafeCloudflareAssetUrl(url, assetBaseUrl) ||
+            !ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(url, hash)
+        ) {
             prefs.edit().remove(key).apply()
             return null
         }
         return url
     }
 
-    private fun cacheUrl(context: Context, hash: String, url: String): Boolean {
-        if (!Regex("^[a-f0-9]{64}$").matches(hash) || !ArtworkMediaPolicy.isSafeImgurUrl(url)) return false
+    private fun cacheUrl(context: Context, hash: String, assetBaseUrl: String, url: String): Boolean {
+        if (!Regex("^[a-f0-9]{64}$").matches(hash) ||
+            !ArtworkUploadPolicy.isSafeCloudflareAssetUrl(url, assetBaseUrl) ||
+            !ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(url, hash)
+        ) return false
         val prefs = context.getSharedPreferences(PREFS_AUTO_CACHE, Context.MODE_PRIVATE)
         val key = AUTO_CACHE_PREFIX + hash
         val value = JSONObject().put("url", url).put("createdAt", System.currentTimeMillis()).toString()
