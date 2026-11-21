@@ -1347,7 +1347,7 @@ class MainActivity : Activity() {
             }
             AlertDialog.Builder(this)
                 .setTitle("Allow automatic public uploads?")
-                .setMessage("This is standing consent. Gecko will send newly detected media covers and selected-app icons to your Cloudflare Worker automatically. R2 objects are public to anyone who has their URL. Your Cloudflare account password and API token are never sent. Enable only if you accept public hosting.")
+                .setMessage("This is standing consent. Gecko will automatically upload newly detected media covers, selected-app icons, and Studio artwork you choose to your Cloudflare Worker. Anyone with an uploaded image URL may view that image. Your Cloudflare account password and API token are never sent. Enable only if you accept public hosting.")
                 .setNegativeButton("CANCEL") { _, _ -> button.isChecked = false }
                 .setPositiveButton("ENABLE PUBLIC UPLOADS") { _, _ ->
                     settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, true).apply()
