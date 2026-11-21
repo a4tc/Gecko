@@ -17,7 +17,9 @@ Gecko Presence is a native Android application for local activity detection, per
 - `AppPresenceProfileStore`: package-keyed profiles with activity type, name, details, state, stream URL, large/small artwork, buttons, timestamps, priority override, enable switch, and optional account-status override.
 - `ArtworkGalleryStore`: bounded app-private manual artwork gallery with SHA-256 deduplication and tamper checks.
 - `ArtworkAutoPublisher`: media artwork URI/bitmap extraction, app-icon fallback and a separate bounded SHA-256 URL cache. Automatic uploads do not consume the manual Gallery quota; they are off by default and require standing public-upload consent.
-- `ImgurAnonymousUploader`: fixed HTTPS Imgur anonymous upload using the user-configured Client-ID; uploaded images become public to anyone who has the URL.
+- `ArtworkUploadConfigStore` and `ArtworkUploadCredentialVault`: per-device Worker configuration and an encrypted upload-token vault using a dedicated Android Keystore key.
+- `CloudflareArtworkUploader`: native HTTPS upload and token-verification client for each user's own Cloudflare Worker + R2 bucket. It validates the content-addressed result before adding the URL to Rich Presence.
+- `ImgurAnonymousUploader`: retained for legacy uploader tests only; new Android upload flows use the configured Cloudflare Worker.
 
 ## Gateway compatibility note
 
@@ -38,6 +40,7 @@ bash scripts/test-core.sh
 bash scripts/verify-source.sh
 bash scripts/security-audit.sh
 bash scripts/test-imgur-upload-dynamic.sh
+cd gecko-cloudflare-artwork-worker && npm test && npm run typecheck
 ```
 
 Full Android build (when the Android toolchain is installed):
@@ -47,13 +50,14 @@ gradle --no-daemon :app:testSecureDebugUnitTest :app:testAutomationDebugUnitTest
 gradle --no-daemon :app:assembleSecureDebug :app:assembleAutomationDebug
 ```
 
-The project uses JDK 17, Gradle 8.10.2, Android SDK Platform 35, AGP 8.8.2, and Kotlin 2.0.21. The source archive does not include `gradle-wrapper.jar`; use an installed Gradle 8.10.2 (as in the commands above) or the included GitHub Actions workflow. Ktor is pinned to 2.3.13 to remain on the Kotlin 2.0-compatible 2.x line; the Ktor 3.3+ line has moved its documented baseline to Kotlin 2.2 and later. The targeted local dynamic tests exercise the uploader against a loopback HTTP server and fuzz the pure protocol/media policies; they are not a full device penetration test. See [docs/SECURITY-PENTEST-0.6.6.md](docs/SECURITY-PENTEST-0.6.6.md) for findings and limitations. The visual system is documented in [docs/GECKO-DESIGN-SYSTEM.md](docs/GECKO-DESIGN-SYSTEM.md), with Kizzy research notes in [docs/KIZZY-REFERENCE.md](docs/KIZZY-REFERENCE.md).
+The project uses JDK 17, Gradle 8.10.2, Android SDK Platform 35, AGP 8.8.2, and Kotlin 2.0.21. The source archive does not include `gradle-wrapper.jar`; use an installed Gradle 8.10.2 (as in the commands above) or the included GitHub Actions workflow. Ktor is pinned to 2.3.13 to remain on the Kotlin 2.0-compatible 2.x line; the Ktor 3.3+ line has moved its documented baseline to Kotlin 2.2 and later. The targeted local dynamic tests exercise the Imgur legacy uploader against a loopback HTTP server and fuzz the pure protocol/media policies; they are not a full device penetration test. See [docs/SECURITY-PENTEST-0.6.6.md](docs/SECURITY-PENTEST-0.6.6.md) for findings and limitations. The visual system is documented in [docs/GECKO-DESIGN-SYSTEM.md](docs/GECKO-DESIGN-SYSTEM.md), with Kizzy research notes in [docs/KIZZY-REFERENCE.md](docs/KIZZY-REFERENCE.md).
 
 ## Known limits
 
 - Real Discord session login, Gateway Identify, Resume, and publishing require an on-device test with the user's own account. No user credential is embedded in this source package.
 - The exact user-session Identify flow is undocumented and can change independently of the documented bot Gateway protocol.
 - Manual Studio and per-app profiles expose all six activity types, Twitch/YouTube stream URL, large/small artwork with tooltips, up to two HTTPS buttons, optional start/end timestamps, and account status. Per-app profiles additionally support priority overrides and enable/disable.
-- Gallery imports are private/local. To make an image visible to Discord, configure your own Imgur Client-ID in Settings. Individual uploads can be confirmed one by one, or automatic public hosting can be enabled with a separate standing-consent prompt. Imgur anonymous uploads are not private; the resulting URL is public to anyone who has it. Revoking consent does not delete images already uploaded.
+- Gallery imports are private/local. To make artwork visible to Discord, configure your own Cloudflare Worker and R2 public asset domain in Settings. Individual uploads require per-image approval; detected media covers and selected-app icons can be automatically uploaded only after a separate standing-consent prompt. R2 URLs are public to anyone who has them. Removing local settings or revoking consent does not delete objects already uploaded to your R2 bucket.
+- The Worker upload token is stored locally as encrypted ciphertext with a dedicated Android Keystore key; the app never asks for Cloudflare account credentials or embeds a shared upload secret.
 - The publisher has inbound frame bounds and a HELLO timeout. Real Discord Gateway acceptance and rich-presence rendering remain device-test requirements.
 - Rooted-device and runtime-instrumentation resistance is not guaranteed by Android Keystore encryption alone.

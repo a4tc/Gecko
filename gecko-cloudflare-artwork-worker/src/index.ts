@@ -1,5 +1,6 @@
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const UPLOAD_PATH = "/v1/upload";
+const VERIFY_PATH = "/v1/verify";
 const OBJECT_PREFIX = "artwork/";
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
@@ -133,13 +134,23 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+function isPublicDnsHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/.test(host)) return false;
+  if (!host.includes(".") || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false;
+  const labels = host.split(".");
+  if (/^\d+$/.test(labels[labels.length - 1] ?? "")) return false;
+  const ipv4Like = labels.length === 4 && labels.every((label) => /^\d+$/.test(label) && Number(label) <= 255);
+  return !ipv4Like;
+}
+
 function validAssetBaseUrl(value: string): URL | null {
   if (!value || value.length > 253 || value !== value.trim()) return null;
   try {
     const url = new URL(value);
     if (
       url.protocol !== "https:" ||
-      !url.hostname ||
+      !isPublicDnsHostname(url.hostname) ||
       url.username ||
       url.password ||
       url.port ||
@@ -172,6 +183,30 @@ async function constantTimeTokenMatch(supplied: string, expected: string): Promi
   let difference = 0;
   for (let index = 0; index < a.length; index += 1) difference |= a[index] ^ b[index];
   return difference === 0;
+}
+
+async function verifyWorker(request: Request, env: Env): Promise<Response> {
+  const configuredToken = env.GECKO_UPLOAD_TOKEN;
+  if (!configuredToken || configuredToken.length < 32) {
+    return json({ success: false, error: "Upload service is not configured." }, 503);
+  }
+
+  const authorization = request.headers.get("authorization") ?? "";
+  const suppliedToken = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!(await constantTimeTokenMatch(suppliedToken, configuredToken))) {
+    return json({ success: false, error: "Unauthorized." }, 401);
+  }
+
+  const baseUrl = validAssetBaseUrl(env.PUBLIC_ASSET_BASE_URL);
+  if (!baseUrl) {
+    return json({ success: false, error: "Public asset domain is not configured." }, 503);
+  }
+
+  return json({
+    success: true,
+    service: "gecko-artwork-upload",
+    assetBaseUrl: baseUrl.origin,
+  });
 }
 
 async function handleUpload(request: Request, env: Env): Promise<Response> {
@@ -231,6 +266,21 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (url.pathname === "/health" && request.method === "GET") {
     return json({ success: true, service: "gecko-artwork-upload" });
+  }
+
+  if (url.pathname === VERIFY_PATH) {
+    if (request.method !== "GET") {
+      return new Response(JSON.stringify({ success: false, error: "Method not allowed." }), {
+        status: 405,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          allow: "GET",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    }
+    return verifyWorker(request, env);
   }
 
   if (url.pathname !== UPLOAD_PATH) {

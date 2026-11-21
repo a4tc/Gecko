@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import android.graphics.BitmapFactory
 import org.json.JSONObject
 import app.geckopresence.host.core.ArtworkMediaPolicy
+import app.geckopresence.host.core.ArtworkUploadPolicy
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -112,7 +113,7 @@ object ArtworkGalleryStore {
 
     fun list(context: Context): List<Artwork> = preferences(context).all.entries
         .asSequence().filter { it.key.startsWith(PREFIX) }
-        .mapNotNull { (_, value) -> (value as? String)?.let(::decode) }
+        .mapNotNull { (_, value) -> (value as? String)?.let { decode(it) } }
         .sortedByDescending { it.createdAt }
         .toList()
 
@@ -144,9 +145,14 @@ object ArtworkGalleryStore {
     }
 
     fun markUploaded(context: Context, id: String, remoteUrl: String): Boolean {
-        if (!ArtworkMediaPolicy.isSafeImgurUrl(remoteUrl)) return false
         val app = context.applicationContext
         val existing = list(app).firstOrNull { it.id == id } ?: return false
+        val legacyImgur = ArtworkMediaPolicy.isSafeImgurUrl(remoteUrl)
+        val assetBase = ArtworkUploadConfigStore.load(app)?.assetBaseUrl
+        val workerAsset = assetBase != null &&
+            ArtworkUploadPolicy.isSafeCloudflareAssetUrl(remoteUrl, assetBase) &&
+            ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(remoteUrl, existing.sha256)
+        if (!legacyImgur && !workerAsset) return false
         return preferences(app).edit().putString(PREFIX + id, existing.copy(remoteUrl = remoteUrl).toJson().toString()).commit()
     }
 
@@ -194,6 +200,7 @@ object ArtworkGalleryStore {
         )
         if (!ArtworkMediaPolicy.isValidStoredFileName(item.id, item.fileName) || item.byteCount !in 1..MAX_FILE_BYTES.toLong() ||
             !Regex("^[a-f0-9]{64}$").matches(item.sha256) || !ArtworkMediaPolicy.mimeMatchesExtension(item.mimeType, item.fileName) ||
-            (item.remoteUrl != null && !ArtworkMediaPolicy.isSafeImgurUrl(item.remoteUrl))) null else item
+            (item.remoteUrl != null && !ArtworkMediaPolicy.isSafeImgurUrl(item.remoteUrl) &&
+                !ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(item.remoteUrl, item.sha256))) null else item
     }.getOrNull()
 }

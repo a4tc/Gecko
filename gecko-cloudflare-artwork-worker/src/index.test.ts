@@ -92,6 +92,49 @@ describe("Gecko artwork Worker", () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+
+  it("rejects IP-literal public asset origins", async () => {
+    const { env, put } = makeEnv();
+    (env as unknown as { PUBLIC_ASSET_BASE_URL: string }).PUBLIC_ASSET_BASE_URL = "https://127.0.0.1";
+    const response = await handleRequest(new Request("https://worker.example/v1/verify", {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    }), env);
+    expect(response.status).toBe(503);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("verifies a configured Worker token and returns only the public asset origin", async () => {
+    const { env, put } = makeEnv();
+    const response = await handleRequest(new Request("https://worker.example/v1/verify", {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    }), env);
+    const data = await response.json() as Record<string, unknown>;
+    expect(response.status).toBe(200);
+    expect(data).toEqual({ success: true, service: "gecko-artwork-upload", assetBaseUrl: ASSET_BASE });
+    expect(JSON.stringify(data)).not.toContain(TOKEN);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid token on the verification endpoint", async () => {
+    const { env, put } = makeEnv();
+    const response = await handleRequest(new Request("https://worker.example/v1/verify", {
+      headers: { authorization: `Bearer ${"b".repeat(64)}` },
+    }), env);
+    expect(response.status).toBe(401);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("requires GET for Worker verification", async () => {
+    const { env, put } = makeEnv();
+    const response = await handleRequest(new Request("https://worker.example/v1/verify", {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}` },
+    }), env);
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it("keeps health checks public without exposing configuration", async () => {
     const { env, put } = makeEnv();
     const response = await handleRequest(new Request("https://worker.example/health"), env);

@@ -46,6 +46,7 @@ import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.AppPresenceProfile
 import app.geckopresence.host.core.RuntimeTogglePolicy
+import app.geckopresence.host.core.ArtworkUploadPolicy
 
 class MainActivity : Activity() {
     private val COLOR_BACKGROUND: Int get() = getColor(R.color.screen_bg)
@@ -1166,68 +1167,162 @@ class MainActivity : Activity() {
     }
 
     private fun buildArtworkUploadSettings() {
+        val savedConfig = ArtworkUploadConfigStore.load(this)
         val card = card()
-        card.addView(text("ARTWORK HOSTING", 11, COLOR_ACCENT, true, mono = true))
+        card.addView(text("CLOUDFLARE ARTWORK HOSTING", 11, COLOR_ACCENT, true, mono = true))
         card.addView(
             text(
-                "Gallery files stay private by default. You can approve one upload at a time or enable standing consent for automatic detected-artwork uploads. Imgur uploads are public to anyone with the URL. Register your own Imgur application and enter its Client-ID below; Gecko does not need your account password or Client Secret.",
+                "Connect your own Cloudflare Worker and R2 bucket. Gecko sends uploads directly to your Worker; your Cloudflare account credentials never enter the app. Uploaded R2 URLs are public to anyone who has the link. The private upload token is encrypted with Android Keystore.",
                 11, COLOR_MUTED,
             ),
             marginTop(7),
         )
-        val clientId = EditText(this).apply {
-            hint = "Imgur Client-ID"
+
+        val workerUrl = EditText(this).apply {
+            hint = "Worker URL · https://your-worker.workers.dev"
             setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            filters = arrayOf(android.text.InputFilter.LengthFilter(64))
-            setText(settings.getString(KEY_IMGUR_CLIENT_ID, ""))
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(savedConfig?.uploadEndpoint?.removeSuffix("/v1/upload").orEmpty())
             setTextColor(COLOR_TEXT)
             setHintTextColor(COLOR_MUTED)
             background = outline(COLOR_LINE)
             setPadding(dp(12), dp(10), dp(12), dp(10))
             minHeight = dp(48)
         }
-        card.addView(clientId, marginTop(10))
-        card.addView(actionButton("SAVE IMGUR CLIENT-ID", true) {
-            val value = clientId.text.toString().trim()
-            if (value.isNotEmpty() && !value.matches(Regex("^[A-Za-z0-9]{8,64}$"))) {
-                Toast.makeText(this, "Client-ID format is invalid", Toast.LENGTH_SHORT).show()
+        card.addView(workerUrl, marginTop(10))
+
+        val assetBase = EditText(this).apply {
+            hint = "Public R2 asset domain · https://assets.example.com"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(savedConfig?.assetBaseUrl.orEmpty())
+            setTextColor(COLOR_TEXT)
+            setHintTextColor(COLOR_MUTED)
+            background = outline(COLOR_LINE)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            minHeight = dp(48)
+        }
+        card.addView(assetBase, marginTop(8))
+
+        val token = EditText(this).apply {
+            hint = if (ArtworkUploadCredentialVault.hasCredential(this@MainActivity)) {
+                "Token saved securely · enter a new token to rotate"
+            } else {
+                "Private Worker upload token · 64-character secret"
+            }
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            filters = arrayOf(android.text.InputFilter.LengthFilter(256))
+            setTextColor(COLOR_TEXT)
+            setHintTextColor(COLOR_MUTED)
+            background = outline(COLOR_LINE)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            minHeight = dp(48)
+        }
+        card.addView(token, marginTop(8))
+
+        card.addView(actionButton("SAVE WORKER CONFIGURATION", true) {
+            val endpoint = ArtworkUploadPolicy.normalizeWorkerEndpoint(workerUrl.text.toString())
+            val publicOrigin = ArtworkUploadPolicy.normalizeAssetBaseUrl(assetBase.text.toString())
+            val newToken = token.text.toString().trim()
+            if (endpoint == null || publicOrigin == null) {
+                Toast.makeText(this, "Enter a valid HTTPS Worker URL and public asset origin", Toast.LENGTH_LONG).show()
                 return@actionButton
             }
-            val automaticHostingWasEnabled = settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)
-            settings.edit().putString(KEY_IMGUR_CLIENT_ID, value).apply()
-            if (value.isEmpty() && automaticHostingWasEnabled) {
-                settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false).apply()
-                updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
-                updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
-                Toast.makeText(this, "Imgur Client-ID removed · automatic public upload disabled", Toast.LENGTH_LONG).show()
+            if (newToken.isNotEmpty() && !ArtworkUploadPolicy.isValidUploadToken(newToken)) {
+                Toast.makeText(this, "Worker token must contain 32–256 printable characters without spaces", Toast.LENGTH_LONG).show()
+                return@actionButton
+            }
+            val storedTokenIsValid = runCatching {
+                ArtworkUploadCredentialVault.loadForUpload(this)
+            }.getOrNull()?.let { ArtworkUploadPolicy.isValidUploadToken(it) } == true
+            if (newToken.isEmpty() && !storedTokenIsValid) {
+                Toast.makeText(this, "Enter your private Worker token before saving", Toast.LENGTH_LONG).show()
+                return@actionButton
+            }
+            try {
+                ArtworkUploadConfigStore.save(this, endpoint, publicOrigin)
+                if (newToken.isNotEmpty()) ArtworkUploadCredentialVault.save(this, newToken)
+                token.setText("")
+                Toast.makeText(this, "Worker configuration saved on this device", Toast.LENGTH_SHORT).show()
+                if (BuildConfig.AUTOMATION_SOURCES_ENABLED &&
+                    settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)
+                ) {
+                    updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
+                    updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
+                }
+                resumePendingArtworkUpload()
                 showPage(PAGE_SETTINGS)
-            } else {
-                Toast.makeText(this, if (value.isEmpty()) "Imgur hosting disabled" else "Imgur Client-ID saved on this device", Toast.LENGTH_SHORT).show()
-                if (value.isNotEmpty()) {
-                    resumePendingArtworkUpload()
-                    if (automaticHostingWasEnabled) {
+            } catch (error: Exception) {
+                Toast.makeText(this, error.message ?: "Could not save Worker configuration", Toast.LENGTH_LONG).show()
+            }
+        }, marginTop(8))
+
+        card.addView(actionButton("TEST WORKER CONNECTION", false) {
+            val endpoint = ArtworkUploadPolicy.normalizeWorkerEndpoint(workerUrl.text.toString())
+            val publicOrigin = ArtworkUploadPolicy.normalizeAssetBaseUrl(assetBase.text.toString())
+            val enteredToken = token.text.toString().trim()
+            if (endpoint == null || publicOrigin == null) {
+                Toast.makeText(this, "Enter a valid Worker URL and public asset origin first", Toast.LENGTH_LONG).show()
+                return@actionButton
+            }
+            val savedToken = if (enteredToken.isNotEmpty()) enteredToken else
+                runCatching { ArtworkUploadCredentialVault.loadForUpload(this) }.getOrNull().orEmpty()
+            if (!ArtworkUploadPolicy.isValidUploadToken(savedToken)) {
+                Toast.makeText(this, "Enter or save your private Worker token first", Toast.LENGTH_LONG).show()
+                return@actionButton
+            }
+            val config = ArtworkUploadConfigStore.Config(endpoint, publicOrigin)
+            Toast.makeText(this, "Checking Worker…", Toast.LENGTH_SHORT).show()
+            Thread({
+                val result = CloudflareArtworkUploader.verifyConnection(config, savedToken)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    val message = when (result) {
+                        is CloudflareArtworkUploader.Result.Success -> "Worker connection and token verified"
+                        is CloudflareArtworkUploader.Result.Failure -> result.message
+                    }
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
+            }, "gecko-worker-verify").start()
+        }, marginTop(6))
+
+        card.addView(actionButton("OPEN CLOUDFLARE DASHBOARD", false) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://dash.cloudflare.com/")))
+        }, marginTop(6))
+
+        card.addView(actionButton("REMOVE WORKER CONFIGURATION", false) {
+            AlertDialog.Builder(this)
+                .setTitle("Remove Cloudflare configuration?")
+                .setMessage("This deletes the saved Worker URL, public asset domain and encrypted upload token from this device. Images already uploaded to R2 are not deleted.")
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("REMOVE") { _, _ ->
+                    settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false).apply()
+                    runCatching { ArtworkUploadCredentialVault.clear(this) }
+                    runCatching { ArtworkUploadConfigStore.clear(this) }
+                    if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
                         updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
                         updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
                     }
+                    Toast.makeText(this, "Worker configuration removed", Toast.LENGTH_SHORT).show()
+                    showPage(PAGE_SETTINGS)
                 }
-            }
-        }, marginTop(8))
-        card.addView(actionButton("OPEN IMGUR APP REGISTRATION", false) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://api.imgur.com/oauth2/addclient")))
-        }, marginTop(8))
+                .show()
+        }, marginTop(6))
 
         card.addView(divider(), marginTop(16))
-        card.addView(text("ONE-TIME PUBLIC UPLOAD CONSENT", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
+        card.addView(text("STANDING PUBLIC-UPLOAD CONSENT", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
         card.addView(
             text(
-                "When enabled, Gecko may automatically upload detected media covers, selected-app icons and Studio artwork you newly choose to Imgur. Uploaded files are public to anyone with their URL. The local Gallery remains private. You can revoke this standing consent at any time.",
+                "When enabled, Gecko may automatically upload detected media covers and selected-app icons to your Worker. Those R2 objects are publicly reachable by URL. This setting stays OFF until you explicitly enable it, and you can revoke it at any time.",
                 11, COLOR_MUTED,
             ),
             marginTop(6),
         )
         val autoUpload = Switch(this).apply {
-            text = "Automatically host detected artwork publicly"
+            text = "Automatically host detected artwork in my R2 bucket"
             textSize = 13f
             setTextColor(COLOR_TEXT)
             minHeight = dp(52)
@@ -1242,15 +1337,17 @@ class MainActivity : Activity() {
                 }
                 return@setOnCheckedChangeListener
             }
-            val savedClientId = settings.getString(KEY_IMGUR_CLIENT_ID, "").orEmpty()
-            if (!app.geckopresence.host.core.ArtworkMediaPolicy.isValidClientId(savedClientId)) {
-                Toast.makeText(this, "Save a valid Imgur Client-ID before enabling automatic public uploads", Toast.LENGTH_LONG).show()
+            val storedTokenIsValid = runCatching {
+                ArtworkUploadCredentialVault.loadForUpload(this)
+            }.getOrNull()?.let { ArtworkUploadPolicy.isValidUploadToken(it) } == true
+            if (ArtworkUploadConfigStore.load(this) == null || !storedTokenIsValid) {
+                Toast.makeText(this, "Save a valid Cloudflare Worker URL, asset domain and private token first", Toast.LENGTH_LONG).show()
                 button.isChecked = false
                 return@setOnCheckedChangeListener
             }
             AlertDialog.Builder(this)
                 .setTitle("Allow automatic public uploads?")
-                .setMessage("This is standing consent, not a per-image prompt. Gecko will send newly detected media covers, selected-app icons and Studio artwork you choose to Imgur automatically. Anyone with an uploaded image URL may view that image. Your Discord session and Imgur Client Secret are not sent. Enable this only if you accept public hosting.")
+                .setMessage("This is standing consent. Gecko will send newly detected media covers and selected-app icons to your Cloudflare Worker automatically. R2 objects are public to anyone who has their URL. Your Cloudflare account password and API token are never sent. Enable only if you accept public hosting.")
                 .setNegativeButton("CANCEL") { _, _ -> button.isChecked = false }
                 .setPositiveButton("ENABLE PUBLIC UPLOADS") { _, _ ->
                     settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, true).apply()
@@ -1271,7 +1368,7 @@ class MainActivity : Activity() {
         val items = ArtworkGalleryStore.list(this)
         val gallery = card()
         gallery.addView(text("ARTWORK GALLERY · PRIVATE LOCAL FILES", 11, COLOR_ACCENT, true, mono = true))
-        gallery.addView(text("Choose an image from Studio. Files stay in app-private storage until a per-image approval or your standing public-upload consent allows an Imgur upload.", 11, COLOR_MUTED), marginTop(6))
+        gallery.addView(text("Choose an image from Studio. Files stay in app-private storage until a per-image approval or your standing public-upload consent allows an upload to your Cloudflare Worker.", 11, COLOR_MUTED), marginTop(6))
         gallery.addView(text("${items.size} / 40 images · 64 MiB storage limit", 10, COLOR_MUTED, mono = true), marginTop(8))
         if (items.isEmpty()) {
             gallery.addView(text("No artwork stored yet.", 11, COLOR_MUTED), marginTop(8))
@@ -1304,7 +1401,7 @@ class MainActivity : Activity() {
                     }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(5) })
                     gallery.addView(actions, marginTop(6))
                 } else {
-                    gallery.addView(actionButton("UPLOAD TO IMGUR PUBLICLY", false) {
+                    gallery.addView(actionButton("UPLOAD TO CLOUDFLARE", false) {
                         clearPendingArtworkSelection()
                         confirmArtworkUpload(item)
                     }, marginTop(6))
@@ -1312,7 +1409,7 @@ class MainActivity : Activity() {
                 gallery.addView(actionButton("DELETE ARTWORK", false) {
                     AlertDialog.Builder(this)
                         .setTitle("Delete artwork?")
-                        .setMessage("This removes the local copy and gallery entry. An already uploaded public Imgur image is not deleted.")
+                        .setMessage("This removes the local copy and gallery entry. An already uploaded public R2 object is not deleted from your Cloudflare bucket.")
                         .setNegativeButton("CANCEL", null)
                         .setPositiveButton("DELETE") { _, _ ->
                             ArtworkGalleryStore.delete(this, item.id)
@@ -1393,60 +1490,63 @@ class MainActivity : Activity() {
             return
         }
         settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
-        val clientId = settings.getString(KEY_IMGUR_CLIENT_ID, "").orEmpty()
-        if (clientId.isBlank()) {
+        if (ArtworkUploadConfigStore.load(this) == null || !ArtworkUploadCredentialVault.hasCredential(this)) {
             AlertDialog.Builder(this)
-                .setTitle("Imgur Client-ID required")
-                .setMessage("The image is saved locally and its Studio destination has been retained. Open Settings, save your Imgur Client-ID, and Gecko will resume this artwork selection.")
+                .setTitle("Cloudflare Worker required")
+                .setMessage("The image is saved locally and its Studio destination has been retained. Configure your Worker URL, public R2 asset domain and private upload token in Settings. The token is stored encrypted on this device.")
                 .setPositiveButton("OPEN SETTINGS") { _, _ -> showPage(PAGE_SETTINGS) }
                 .setNegativeButton("KEEP LOCAL") { _, _ -> clearPendingArtworkSelection(); showPage(PAGE_LIBRARY) }
                 .show()
             return
         }
         if (settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)) {
-            uploadArtwork(artwork, clientId, requireStandingConsent = true)
+            uploadArtwork(artwork, requireStandingConsent = true)
             return
         }
         AlertDialog.Builder(this)
             .setTitle("Upload artwork publicly?")
-            .setMessage("Gecko will upload '${artwork.displayName}' (${artwork.byteCount / 1024} KiB) to Imgur using anonymous hosting. Anyone with the resulting URL may view it. The local copy remains on this device. Continue?")
+            .setMessage("Gecko will upload '${artwork.displayName}' (${artwork.byteCount / 1024} KiB) to your Cloudflare Worker and R2 bucket. Anyone with the resulting URL may view it. The local copy remains on this device. Continue?")
             .setNegativeButton("CANCEL") { _, _ -> clearPendingArtworkSelection() }
-            .setPositiveButton("UPLOAD") { _, _ -> uploadArtwork(artwork, clientId) }
+            .setPositiveButton("UPLOAD") { _, _ -> uploadArtwork(artwork) }
             .show()
     }
 
     private fun uploadArtwork(
         artwork: ArtworkGalleryStore.Artwork,
-        clientId: String,
         requireStandingConsent: Boolean = false,
     ) {
         if (artworkUploadInProgress || artworkImportInProgress) return
         artworkUploadInProgress = true
         settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
-        Toast.makeText(this, "Uploading artwork to Imgur…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Uploading artwork to your Cloudflare Worker…", Toast.LENGTH_SHORT).show()
         Thread({
             val consentStillEnabled = !requireStandingConsent || settings.getBoolean(
                 ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD,
                 false,
             )
-            val file = if (consentStillEnabled) ArtworkGalleryStore.file(this, artwork) else null
+            val config = if (consentStillEnabled) ArtworkUploadConfigStore.load(this) else null
+            val token = if (config != null) runCatching {
+                ArtworkUploadCredentialVault.loadForUpload(this)
+            }.getOrNull() else null
+            val file = if (config != null && token != null) ArtworkGalleryStore.file(this, artwork) else null
             val result = when {
-                !consentStillEnabled -> ImgurAnonymousUploader.Result.Failure("Automatic public-upload consent was revoked before upload started.")
-                file == null -> ImgurAnonymousUploader.Result.Failure("Local artwork file is missing or failed its integrity check.")
-                else -> ImgurAnonymousUploader.upload(file, clientId)
+                !consentStillEnabled -> CloudflareArtworkUploader.Result.Failure("Automatic public-upload consent was revoked before upload started.")
+                config == null -> CloudflareArtworkUploader.Result.Failure("Cloudflare Worker settings are missing or invalid.")
+                token == null -> CloudflareArtworkUploader.Result.Failure("Private Worker token is missing or cannot be decrypted. Save it again in Settings.")
+                file == null -> CloudflareArtworkUploader.Result.Failure("Local artwork file is missing or failed its integrity check.")
+                else -> CloudflareArtworkUploader.upload(file, config, token)
             }
-            val metadataSaved = if (result is ImgurAnonymousUploader.Result.Success) {
-                ArtworkGalleryStore.markUploaded(this, artwork.id, result.directUrl)
-            } else false
+            val directUrl = (result as? CloudflareArtworkUploader.Result.Success)?.directUrl
+            val metadataSaved = directUrl != null && ArtworkGalleryStore.markUploaded(this, artwork.id, directUrl)
             runOnUiThread {
                 artworkUploadInProgress = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {
-                    is ImgurAnonymousUploader.Result.Success -> {
-                        if (metadataSaved) {
+                    is CloudflareArtworkUploader.Result.Success -> {
+                        if (metadataSaved && directUrl != null) {
                             val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
                             if (isAllowedArtworkTarget(targetKey)) {
-                                settings.edit().putString(targetKey, result.directUrl).commit()
+                                settings.edit().putString(targetKey, directUrl).commit()
                                 clearPendingArtworkSelection()
                                 Toast.makeText(this, "Artwork uploaded and inserted into Studio", Toast.LENGTH_LONG).show()
                                 showPage(PAGE_STUDIO)
@@ -1456,10 +1556,10 @@ class MainActivity : Activity() {
                                 showPage(PAGE_LIBRARY)
                             }
                         } else {
-                            Toast.makeText(this, "Upload succeeded but local gallery metadata could not be updated", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "Upload succeeded but local Gallery metadata could not be updated", Toast.LENGTH_LONG).show()
                         }
                     }
-                    is ImgurAnonymousUploader.Result.Failure ->
+                    is CloudflareArtworkUploader.Result.Failure ->
                         Toast.makeText(this, "${result.message} Pending artwork selection was preserved for retry.", Toast.LENGTH_LONG).show()
                 }
             }
