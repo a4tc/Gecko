@@ -6,13 +6,12 @@ import android.provider.OpenableColumns
 import android.graphics.BitmapFactory
 import org.json.JSONObject
 import app.geckopresence.host.core.ArtworkMediaPolicy
-import app.geckopresence.host.core.ArtworkUploadPolicy
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Private local artwork library. Public upload is handled separately and requires explicit standing consent or per-image approval. */
+/** Private local artwork library. Hosting for Discord is resolved on demand by ArtworkAutoPublisher; no remote URL is persisted here. */
 object ArtworkGalleryStore {
     const val MAX_FILE_BYTES = ArtworkMediaPolicy.MAX_FILE_BYTES
     private const val MAX_ITEMS = ArtworkMediaPolicy.MAX_ITEMS
@@ -27,7 +26,6 @@ object ArtworkGalleryStore {
         val mimeType: String,
         val byteCount: Long,
         val sha256: String,
-        val remoteUrl: String? = null,
         val createdAt: Long,
     )
 
@@ -144,18 +142,6 @@ object ArtworkGalleryStore {
         return target
     }
 
-    fun markUploaded(context: Context, id: String, remoteUrl: String): Boolean {
-        val app = context.applicationContext
-        val existing = list(app).firstOrNull { it.id == id } ?: return false
-        val legacyImgur = ArtworkMediaPolicy.isSafeImgurUrl(remoteUrl)
-        val assetBase = ArtworkUploadConfigStore.load(app)?.assetBaseUrl
-        val workerAsset = assetBase != null &&
-            ArtworkUploadPolicy.isSafeCloudflareAssetUrl(remoteUrl, assetBase) &&
-            ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(remoteUrl, existing.sha256)
-        if (!legacyImgur && !workerAsset) return false
-        return preferences(app).edit().putString(PREFIX + id, existing.copy(remoteUrl = remoteUrl).toJson().toString()).commit()
-    }
-
     fun delete(context: Context, id: String): Boolean {
         if (!id.matches(Regex("^[a-f0-9-]{36}$"))) return false
         val app = context.applicationContext
@@ -188,7 +174,7 @@ object ArtworkGalleryStore {
 
     private fun Artwork.toJson() = JSONObject().put("id", id).put("displayName", displayName)
         .put("fileName", fileName).put("mimeType", mimeType).put("byteCount", byteCount)
-        .put("sha256", sha256).put("remoteUrl", remoteUrl.orEmpty()).put("createdAt", createdAt)
+        .put("sha256", sha256).put("createdAt", createdAt)
 
     private fun decode(raw: String): Artwork? = runCatching {
         val json = JSONObject(raw)
@@ -196,11 +182,9 @@ object ArtworkGalleryStore {
             id = json.getString("id"), displayName = json.getString("displayName"),
             fileName = json.getString("fileName"), mimeType = json.getString("mimeType"),
             byteCount = json.getLong("byteCount"), sha256 = json.getString("sha256"),
-            remoteUrl = json.optString("remoteUrl").takeIf(String::isNotBlank), createdAt = json.getLong("createdAt"),
+            createdAt = json.getLong("createdAt"),
         )
         if (!ArtworkMediaPolicy.isValidStoredFileName(item.id, item.fileName) || item.byteCount !in 1..MAX_FILE_BYTES.toLong() ||
-            !Regex("^[a-f0-9]{64}$").matches(item.sha256) || !ArtworkMediaPolicy.mimeMatchesExtension(item.mimeType, item.fileName) ||
-            (item.remoteUrl != null && !ArtworkMediaPolicy.isSafeImgurUrl(item.remoteUrl) &&
-                !ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(item.remoteUrl, item.sha256))) null else item
+            !Regex("^[a-f0-9]{64}$").matches(item.sha256) || !ArtworkMediaPolicy.mimeMatchesExtension(item.mimeType, item.fileName)) null else item
     }.getOrNull()
 }

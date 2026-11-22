@@ -28,16 +28,6 @@ object ArtworkMediaPolicy {
         width in 1..MAX_WIDTH_OR_HEIGHT && height in 1..MAX_WIDTH_OR_HEIGHT &&
             width.toLong() * height.toLong() <= MAX_PIXEL_COUNT
 
-    fun isSafeImgurUrl(value: String): Boolean {
-        if (value.isBlank() || value.length > 512 || value.any { it.isWhitespace() || it.isISOControl() }) return false
-        val uri = runCatching { URI(value) }.getOrNull() ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host?.equals("i.imgur.com", ignoreCase = true) == true &&
-            uri.port in setOf(-1, 443) && uri.userInfo == null && uri.fragment == null
-    }
-
-    fun isValidClientId(value: String): Boolean = value.matches(Regex("^[A-Za-z0-9]{8,64}$"))
-
     fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes).joinToString("") { "%02x".format(it) }
 

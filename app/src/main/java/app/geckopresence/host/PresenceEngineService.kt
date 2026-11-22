@@ -20,6 +20,7 @@ import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.PresenceSourceArbiter
 import app.geckopresence.host.core.PresenceUpdate
 import app.geckopresence.host.core.PresenceActivityType
+import app.geckopresence.host.core.DiscordArtworkPolicy
 import app.geckopresence.host.core.PresenceAsset
 import app.geckopresence.host.core.PresenceButton
 import app.geckopresence.host.core.RpcCommand
@@ -370,8 +371,7 @@ class PresenceEngineService : Service() {
 
         handleIncomingPresence(update)
         if (update.largeImage != null) return
-        val settings = getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE)
-        if (!settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)) return
+        if (!ArtworkAutoPublisher.isEnabled(this)) return
 
         ArtworkAutoPublisher.resolveApplicationIcon(this, packageName.orEmpty(), update.name) { asset, artworkStatus ->
             mainHandler.post {
@@ -446,7 +446,40 @@ class PresenceEngineService : Service() {
     }
 
     private fun handleIncomingPresence(update: PresenceUpdate) {
-        updatePresenceCandidates { PresenceSourceArbiter.upsert(it, update) }
+        val localLarge = update.largeImage?.image?.let(DiscordArtworkPolicy::localId)
+        val localSmall = update.smallImage?.image?.let(DiscordArtworkPolicy::localId)
+        if (localLarge == null && localSmall == null) {
+            updatePresenceCandidates { PresenceSourceArbiter.upsert(it, update) }
+            return
+        }
+
+        // Stable "gecko:<id>" references never reach Discord. Publish the text immediately without the
+        // unresolved image, then re-publish once the artwork has been hosted and registered.
+        val interim = update.copy(
+            largeImage = update.largeImage?.takeIf { localLarge == null },
+            smallImage = update.smallImage?.takeIf { localSmall == null },
+        )
+        updatePresenceCandidates { PresenceSourceArbiter.upsert(it, interim) }
+
+        fun resolve(galleryId: String?, apply: (PresenceUpdate, String) -> PresenceUpdate) {
+            if (galleryId == null) return
+            ArtworkAutoPublisher.resolveGalleryReference(this, galleryId) { reference, status ->
+                mainHandler.post {
+                    if (engineState != STATE_RUNNING || reference == null) {
+                        status?.let(::recordEvent)
+                        return@post
+                    }
+                    val current = synchronized(presenceLock) { presenceCandidates[update.source] }
+                    if (current != null && current.sourceType == update.sourceType &&
+                        current.startTimestampSeconds == update.startTimestampSeconds
+                    ) {
+                        updatePresenceCandidates { PresenceSourceArbiter.upsert(it, apply(current, reference)) }
+                    }
+                }
+            }
+        }
+        resolve(localLarge) { current, ref -> current.copy(largeImage = update.largeImage?.copy(image = ref)) }
+        resolve(localSmall) { current, ref -> current.copy(smallImage = update.smallImage?.copy(image = ref)) }
     }
 
     private fun clearSourceType(sourceType: String) {

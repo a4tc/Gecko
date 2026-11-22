@@ -22,29 +22,29 @@ object ArtworkUploadCredentialVault {
     @Throws(IllegalArgumentException::class, IllegalStateException::class)
     fun save(context: Context, rawToken: String) = synchronized(lock) {
         val token = ArtworkUploadTokenPolicy.normalize(rawToken)
-            ?: throw IllegalArgumentException("Worker upload token must be 32–256 printable characters without whitespace.")
+            ?: throw IllegalArgumentException("Webhook URL must be 32–256 printable characters without whitespace.")
         val ciphertext = ArtworkUploadTokenCodec.encrypt(token, getOrCreateKey())
         check(preferences(context).edit().putString(KEY_CIPHERTEXT, ciphertext).commit()) {
-            "Could not persist encrypted Worker upload token"
+            "Could not persist encrypted webhook URL"
         }
     }
 
-    /** Only call on a foreground operation that needs to authenticate to the configured Worker. */
+    /** Only call on a foreground operation that needs to authenticate to the configured webhook. */
     @Throws(IllegalStateException::class)
     fun loadForUpload(context: Context): String? = synchronized(lock) {
         val ciphertext = preferences(context).getString(KEY_CIPHERTEXT, null) ?: return null
         val key = getExistingKey()
-            ?: throw IllegalStateException("Worker token key is missing; save the token again in Settings")
+            ?: throw IllegalStateException("Webhook key is missing; save the webhook again in Settings")
         try {
             ArtworkUploadTokenCodec.decrypt(ciphertext, key)
         } catch (error: Exception) {
-            throw IllegalStateException("Stored Worker token cannot be decrypted; save it again in Settings", error)
+            throw IllegalStateException("Stored webhook cannot be decrypted; save it again in Settings", error)
         }
     }
 
     fun clear(context: Context) = synchronized(lock) {
         check(preferences(context).edit().remove(KEY_CIPHERTEXT).commit()) {
-            "Could not remove encrypted Worker upload token"
+            "Could not remove encrypted webhook URL"
         }
         runCatching { loadKeyStore().deleteEntry(KEY_ALIAS) }.getOrElse { error ->
             throw IllegalStateException("Could not remove Worker token Keystore key", error)

@@ -46,7 +46,6 @@ import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.AppPresenceProfile
 import app.geckopresence.host.core.RuntimeTogglePolicy
-import app.geckopresence.host.core.ArtworkUploadPolicy
 
 class MainActivity : Activity() {
     private val COLOR_BACKGROUND: Int get() = getColor(R.color.screen_bg)
@@ -129,7 +128,6 @@ class MainActivity : Activity() {
         if (DiscordWebViewIsolation.isAvailable() && DiscordWebSessionCleanup.hasPendingCleanup(this)) {
             DiscordWebSessionCleanup.clear(this)
         }
-        restoreCompletedPendingArtwork()
         showPage(activePage)
     }
 
@@ -545,9 +543,9 @@ class MainActivity : Activity() {
         )
         val uriInput = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         val streamUrl = textField("Twitch or YouTube URL (Streaming only)", "studio_draft_stream_url", "", 512, uriInput)
-        val largeImage = textField("Large image: HTTPS URL, mp: reference, or asset ID", "studio_draft_large_image", "", 300, uriInput)
+        val largeImage = textField("Large image: picked artwork, HTTPS URL, mp: reference, or asset ID", "studio_draft_large_image", "", 300, uriInput)
         val largeTooltip = textField("Large image tooltip", "studio_draft_large_tooltip", "", 128)
-        val smallImage = textField("Small image: HTTPS URL, mp: reference, or asset ID", "studio_draft_small_image", "", 300, uriInput)
+        val smallImage = textField("Small image: picked artwork, HTTPS URL, mp: reference, or asset ID", "studio_draft_small_image", "", 300, uriInput)
         val smallTooltip = textField("Small image tooltip", "studio_draft_small_tooltip", "", 128)
         val button1Label = textField("Button 1 label", "studio_draft_button1_label", "", 32)
         val button1Url = textField("Button 1 HTTPS URL", "studio_draft_button1_url", "", 512, uriInput)
@@ -640,7 +638,7 @@ class MainActivity : Activity() {
         editor.addView(text("DISCORD ACTIVITY DISPLAY", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
         editor.addView(text("Discord formats the headline by activity type: Playing/Listening/Watching/Competing use Activity name; Streaming uses Details; Custom Status uses State. The other fields remain separate activity metadata. The Application ID associates this activity with your registered Discord application and its assets.", 11, COLOR_MUTED), marginTop(5))
         editor.addView(text("TRANSPORT", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
-        editor.addView(text("Once the manual override is active, field changes are validated and sent automatically after a short pause. External artwork URLs must be publicly reachable by Discord.", 11, COLOR_MUTED), marginTop(5))
+        editor.addView(text("Once the manual override is active, field changes are validated and sent automatically after a short pause. Picked Gallery artwork is hosted automatically; external URLs must be publicly reachable by Discord.", 11, COLOR_MUTED), marginTop(5))
         val applyStudio: (Boolean) -> Boolean = applyStudio@{ showConfirmation ->
             val currentName = name.text.toString().trim()
             val currentDetails = details.text.toString().trim()
@@ -886,7 +884,7 @@ class MainActivity : Activity() {
         profileCard.addView(text("ACCOUNT STATUS OVERRIDE", 10, COLOR_MUTED, true, mono = true), marginTop(12))
         profileCard.addView(statusSpinner, marginTop(6))
         profileCard.addView(enabledSwitch, marginTop(10))
-        profileCard.addView(text("Image uploads are optional and public when sent to Imgur. External image URLs must be publicly reachable by Discord. Blank timestamps use the app-detection start time.", 10, COLOR_MUTED), marginTop(8))
+        profileCard.addView(text("Picked artwork is hosted automatically through your Discord webhook. External image URLs must be publicly reachable by Discord. Blank timestamps use the app-detection start time.", 10, COLOR_MUTED), marginTop(8))
 
         profileCard.addView(actionButton("SAVE ADVANCED APP PROFILE", true) {
             fun optionalLong(field: EditText, label: String): Long? {
@@ -1167,48 +1165,21 @@ class MainActivity : Activity() {
     }
 
     private fun buildArtworkUploadSettings() {
-        val savedConfig = ArtworkUploadConfigStore.load(this)
         val card = card()
-        card.addView(text("CLOUDFLARE ARTWORK HOSTING", 11, COLOR_ACCENT, true, mono = true))
+        card.addView(text("DISCORD ARTWORK · AUTOMATIC", 11, COLOR_ACCENT, true, mono = true))
         card.addView(
             text(
-                "Connect your own Cloudflare Worker and R2 bucket. Gecko sends uploads directly to your Worker; your Cloudflare account credentials never enter the app. Uploaded R2 URLs are public to anyone who has the link. The private upload token is encrypted with Android Keystore.",
+                "Gecko hosts artwork through a private Discord webhook that you create once in a server you own: Server Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL. Covers, app icons and Studio images are then uploaded, registered with Discord and refreshed automatically. No third-party image host and no copy-pasting image IDs. Artwork is visible to anyone who obtains its Discord media link.",
                 11, COLOR_MUTED,
             ),
             marginTop(7),
         )
 
-        val workerUrl = EditText(this).apply {
-            hint = "Worker URL · https://your-worker.workers.dev"
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setText(savedConfig?.uploadEndpoint?.removeSuffix("/v1/upload").orEmpty())
-            setTextColor(COLOR_TEXT)
-            setHintTextColor(COLOR_MUTED)
-            background = outline(COLOR_LINE)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            minHeight = dp(48)
-        }
-        card.addView(workerUrl, marginTop(10))
-
-        val assetBase = EditText(this).apply {
-            hint = "Public R2 asset domain · https://assets.example.com"
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setText(savedConfig?.assetBaseUrl.orEmpty())
-            setTextColor(COLOR_TEXT)
-            setHintTextColor(COLOR_MUTED)
-            background = outline(COLOR_LINE)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            minHeight = dp(48)
-        }
-        card.addView(assetBase, marginTop(8))
-
-        val token = EditText(this).apply {
+        val webhook = EditText(this).apply {
             hint = if (ArtworkUploadCredentialVault.hasCredential(this@MainActivity)) {
-                "Token saved securely · enter a new token to rotate"
+                "Webhook saved securely · paste a new URL to replace it"
             } else {
-                "Private Worker upload token · 64-character secret"
+                "Webhook URL · https://discord.com/api/webhooks/..."
             }
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -1221,146 +1192,70 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(10), dp(12), dp(10))
             minHeight = dp(48)
         }
-        card.addView(token, marginTop(8))
+        card.addView(webhook, marginTop(10))
 
-        card.addView(actionButton("SAVE WORKER CONFIGURATION", true) {
-            val endpoint = ArtworkUploadPolicy.normalizeWorkerEndpoint(workerUrl.text.toString())
-            val publicOrigin = ArtworkUploadPolicy.normalizeAssetBaseUrl(assetBase.text.toString())
-            val newToken = token.text.toString().trim()
-            if (endpoint == null || publicOrigin == null) {
-                Toast.makeText(this, "Enter a valid HTTPS Worker URL and public asset origin", Toast.LENGTH_LONG).show()
-                return@actionButton
-            }
-            if (newToken.isNotEmpty() && !ArtworkUploadPolicy.isValidUploadToken(newToken)) {
-                Toast.makeText(this, "Worker token must contain 32–256 printable characters without spaces", Toast.LENGTH_LONG).show()
-                return@actionButton
-            }
-            val storedTokenIsValid = runCatching {
-                ArtworkUploadCredentialVault.loadForUpload(this)
-            }.getOrNull()?.let { ArtworkUploadPolicy.isValidUploadToken(it) } == true
-            if (newToken.isEmpty() && !storedTokenIsValid) {
-                Toast.makeText(this, "Enter your private Worker token before saving", Toast.LENGTH_LONG).show()
+        card.addView(actionButton("SAVE WEBHOOK", true) {
+            val normalized = app.geckopresence.host.core.DiscordArtworkPolicy.normalizeWebhookUrl(webhook.text.toString())
+            if (normalized == null) {
+                Toast.makeText(this, "Paste a valid Discord webhook URL (discord.com/api/webhooks/ID/TOKEN)", Toast.LENGTH_LONG).show()
                 return@actionButton
             }
             try {
-                ArtworkUploadConfigStore.save(this, endpoint, publicOrigin)
-                if (newToken.isNotEmpty()) ArtworkUploadCredentialVault.save(this, newToken)
-                token.setText("")
-                Toast.makeText(this, "Worker configuration saved on this device", Toast.LENGTH_SHORT).show()
-                if (BuildConfig.AUTOMATION_SOURCES_ENABLED &&
-                    settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)
-                ) {
-                    updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
-                    updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
-                }
-                resumePendingArtworkUpload()
+                ArtworkUploadCredentialVault.save(this, normalized)
+                webhook.setText("")
+                Toast.makeText(this, "Webhook saved on this device", Toast.LENGTH_SHORT).show()
                 showPage(PAGE_SETTINGS)
             } catch (error: Exception) {
-                Toast.makeText(this, error.message ?: "Could not save Worker configuration", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, error.message ?: "Could not save webhook", Toast.LENGTH_LONG).show()
             }
-        }, marginTop(8))
+        }, marginTop(10))
 
-        card.addView(actionButton("TEST WORKER CONNECTION", false) {
-            val endpoint = ArtworkUploadPolicy.normalizeWorkerEndpoint(workerUrl.text.toString())
-            val publicOrigin = ArtworkUploadPolicy.normalizeAssetBaseUrl(assetBase.text.toString())
-            val enteredToken = token.text.toString().trim()
-            if (endpoint == null || publicOrigin == null) {
-                Toast.makeText(this, "Enter a valid Worker URL and public asset origin first", Toast.LENGTH_LONG).show()
+        card.addView(actionButton("SEND TEST IMAGE", false) {
+            val savedWebhook = runCatching { ArtworkUploadCredentialVault.loadForUpload(this) }.getOrNull()
+                ?.let(app.geckopresence.host.core.DiscordArtworkPolicy::normalizeWebhookUrl)
+            val userToken = runCatching { DiscordCredentialVault.loadForConnection(this) }.getOrNull()
+            if (savedWebhook == null || userToken == null) {
+                Toast.makeText(this, "Save both the webhook and your Discord credential first", Toast.LENGTH_LONG).show()
                 return@actionButton
             }
-            val savedToken = if (enteredToken.isNotEmpty()) enteredToken else
-                runCatching { ArtworkUploadCredentialVault.loadForUpload(this) }.getOrNull().orEmpty()
-            if (!ArtworkUploadPolicy.isValidUploadToken(savedToken)) {
-                Toast.makeText(this, "Enter or save your private Worker token first", Toast.LENGTH_LONG).show()
-                return@actionButton
-            }
-            val config = ArtworkUploadConfigStore.Config(endpoint, publicOrigin)
-            Toast.makeText(this, "Checking Worker…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Testing the full artwork path…", Toast.LENGTH_SHORT).show()
             Thread({
-                val result = CloudflareArtworkUploader.verifyConnection(config, savedToken)
+                val bitmap = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888)
+                bitmap.eraseColor(COLOR_ACCENT)
+                val bytes = java.io.ByteArrayOutputStream().use { out ->
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                    out.toByteArray()
+                }
+                bitmap.recycle()
+                val hash = app.geckopresence.host.core.ArtworkMediaPolicy.sha256(bytes)
+                val result = DiscordArtworkUploader.uploadAndRegister(savedWebhook, BuildConfig.DISCORD_APP_ID, userToken, bytes, hash)
+                if (result is DiscordArtworkUploader.Result.Success) {
+                    DiscordArtworkUploader.deleteWebhookMessage(savedWebhook, result.value.messageId)
+                }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     val message = when (result) {
-                        is CloudflareArtworkUploader.Result.Success -> "Worker connection and token verified"
-                        is CloudflareArtworkUploader.Result.Failure -> result.message
+                        is DiscordArtworkUploader.Result.Success -> "Webhook upload and Discord registration both work"
+                        is DiscordArtworkUploader.Result.Failure -> result.message
                     }
                     Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                 }
-            }, "gecko-worker-verify").start()
-        }, marginTop(6))
+            }, "gecko-artwork-test").start()
+        }, marginTop(8))
 
-        card.addView(actionButton("OPEN CLOUDFLARE DASHBOARD", false) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://dash.cloudflare.com/")))
-        }, marginTop(6))
-
-        card.addView(actionButton("REMOVE WORKER CONFIGURATION", false) {
+        card.addView(actionButton("REMOVE WEBHOOK", false) {
             AlertDialog.Builder(this)
-                .setTitle("Remove Cloudflare configuration?")
-                .setMessage("This deletes the saved Worker URL, public asset domain and encrypted upload token from this device. Images already uploaded to R2 are not deleted.")
+                .setTitle("Remove webhook?")
+                .setMessage("This deletes the saved webhook from this device. Automatic artwork stops until a new webhook is saved. Messages already posted in your channel are not deleted.")
                 .setNegativeButton("CANCEL", null)
                 .setPositiveButton("REMOVE") { _, _ ->
-                    settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false).apply()
                     runCatching { ArtworkUploadCredentialVault.clear(this) }
-                    runCatching { ArtworkUploadConfigStore.clear(this) }
-                    if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
-                        updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
-                        updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
-                    }
-                    Toast.makeText(this, "Worker configuration removed", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Webhook removed", Toast.LENGTH_SHORT).show()
                     showPage(PAGE_SETTINGS)
-                }
-                .show()
-        }, marginTop(6))
+                }.show()
+        }, marginTop(8))
 
-        card.addView(divider(), marginTop(16))
-        card.addView(text("STANDING PUBLIC-UPLOAD CONSENT", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
-        card.addView(
-            text(
-                "When enabled, Gecko may automatically upload detected media covers and selected-app icons to your Worker. Those R2 objects are publicly reachable by URL. This setting stays OFF until you explicitly enable it, and you can revoke it at any time.",
-                11, COLOR_MUTED,
-            ),
-            marginTop(6),
-        )
-        val autoUpload = Switch(this).apply {
-            text = "Automatically host detected artwork in my R2 bucket"
-            textSize = 13f
-            setTextColor(COLOR_TEXT)
-            minHeight = dp(52)
-            isChecked = settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)
-        }
-        autoUpload.setOnCheckedChangeListener { button, checked ->
-            if (!checked) {
-                settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false).apply()
-                if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
-                    updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
-                    updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
-                }
-                return@setOnCheckedChangeListener
-            }
-            val storedTokenIsValid = runCatching {
-                ArtworkUploadCredentialVault.loadForUpload(this)
-            }.getOrNull()?.let { ArtworkUploadPolicy.isValidUploadToken(it) } == true
-            if (ArtworkUploadConfigStore.load(this) == null || !storedTokenIsValid) {
-                Toast.makeText(this, "Save a valid Cloudflare Worker URL, asset domain and private token first", Toast.LENGTH_LONG).show()
-                button.isChecked = false
-                return@setOnCheckedChangeListener
-            }
-            AlertDialog.Builder(this)
-                .setTitle("Allow automatic public uploads?")
-                .setMessage("This is standing consent. Gecko will automatically upload newly detected media covers, selected-app icons, and Studio artwork you choose to your Cloudflare Worker. Anyone with an uploaded image URL may view that image. Your Cloudflare account password and API token are never sent. Enable only if you accept public hosting.")
-                .setNegativeButton("CANCEL") { _, _ -> button.isChecked = false }
-                .setPositiveButton("ENABLE PUBLIC UPLOADS") { _, _ ->
-                    settings.edit().putBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, true).apply()
-                    if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
-                        updateSources(PresenceEngineService.ACTION_UPDATE_APP_TRACKING)
-                        updateSources(PresenceEngineService.ACTION_UPDATE_MEDIA_TRACKING)
-                    }
-                    Toast.makeText(this, "Standing public-upload consent enabled", Toast.LENGTH_SHORT).show()
-                }
-                .setOnCancelListener { button.isChecked = false }
-                .show()
-        }
-        card.addView(autoUpload, marginTop(4))
+        addSwitch(card, "Automatic artwork for media covers, app icons and Studio images", ArtworkAutoPublisher.KEY_AUTO_ARTWORK, true)
         pageContent.addView(card, marginTop(12))
     }
 
@@ -1368,7 +1263,7 @@ class MainActivity : Activity() {
         val items = ArtworkGalleryStore.list(this)
         val gallery = card()
         gallery.addView(text("ARTWORK GALLERY · PRIVATE LOCAL FILES", 11, COLOR_ACCENT, true, mono = true))
-        gallery.addView(text("Choose an image from Studio. Files stay in app-private storage until a per-image approval or your standing public-upload consent allows an upload to your Cloudflare Worker.", 11, COLOR_MUTED), marginTop(6))
+        gallery.addView(text("Pick an image from Studio. It is stored privately on this device and hosted through your Discord webhook automatically whenever presence needs it.", 11, COLOR_MUTED), marginTop(6))
         gallery.addView(text("${items.size} / 40 images · 64 MiB storage limit", 10, COLOR_MUTED, mono = true), marginTop(8))
         if (items.isEmpty()) {
             gallery.addView(text("No artwork stored yet.", 11, COLOR_MUTED), marginTop(8))
@@ -1384,32 +1279,22 @@ class MainActivity : Activity() {
                 }
                 gallery.addView(thumbnail, LinearLayout.LayoutParams(dp(112), dp(112)).apply { topMargin = dp(8) })
                 loadArtworkPreview(thumbnail, item.id)
-                gallery.addView(text("ID · ${item.id}", 9, COLOR_MUTED, mono = true), marginTop(6))
-                gallery.addView(actionButton("COPY IMAGE ID", false) {
-                    copyText(item.id, "Artwork ID copied")
-                }, marginTop(4))
-                gallery.addView(text("${item.mimeType} · ${item.byteCount / 1024} KiB\n${item.remoteUrl ?: "LOCAL ONLY · NOT UPLOADED"}", 10, COLOR_MUTED, mono = true), marginTop(4))
-                if (item.remoteUrl != null) {
-                    val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    actions.addView(actionButton("USE LARGE", false) {
-                        settings.edit().putString("studio_draft_large_image", item.remoteUrl).apply()
-                        showPage(PAGE_STUDIO)
-                    }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(5) })
-                    actions.addView(actionButton("USE SMALL", false) {
-                        settings.edit().putString("studio_draft_small_image", item.remoteUrl).apply()
-                        showPage(PAGE_STUDIO)
-                    }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(5) })
-                    gallery.addView(actions, marginTop(6))
-                } else {
-                    gallery.addView(actionButton("UPLOAD TO CLOUDFLARE", false) {
-                        clearPendingArtworkSelection()
-                        confirmArtworkUpload(item)
-                    }, marginTop(6))
-                }
+                gallery.addView(text("${item.mimeType} · ${item.byteCount / 1024} KiB", 10, COLOR_MUTED, mono = true), marginTop(4))
+                val localRef = app.geckopresence.host.core.DiscordArtworkPolicy.localReference(item.id).orEmpty()
+                val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                actions.addView(actionButton("USE LARGE", false) {
+                    settings.edit().putString("studio_draft_large_image", localRef).apply()
+                    showPage(PAGE_STUDIO)
+                }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(5) })
+                actions.addView(actionButton("USE SMALL", false) {
+                    settings.edit().putString("studio_draft_small_image", localRef).apply()
+                    showPage(PAGE_STUDIO)
+                }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(5) })
+                gallery.addView(actions, marginTop(6))
                 gallery.addView(actionButton("DELETE ARTWORK", false) {
                     AlertDialog.Builder(this)
                         .setTitle("Delete artwork?")
-                        .setMessage("This removes the local copy and gallery entry. An already uploaded public R2 object is not deleted from your Cloudflare bucket.")
+                        .setMessage("This removes the local copy and gallery entry. Messages already posted to your webhook channel are not deleted.")
                         .setNegativeButton("CANCEL", null)
                         .setPositiveButton("DELETE") { _, _ ->
                             ArtworkGalleryStore.delete(this, item.id)
@@ -1431,7 +1316,7 @@ class MainActivity : Activity() {
             return
         }
         // Persist a logical target, not an EditText reference that can disappear when
-        // the Activity is recreated or the user visits Settings to configure Imgur.
+        // the Activity is recreated or the user visits Settings.
         settings.edit()
             .putString(KEY_PENDING_ARTWORK_TARGET, targetKey)
             .remove(KEY_PENDING_ARTWORK_ID)
@@ -1461,139 +1346,45 @@ class MainActivity : Activity() {
                         clearPendingArtworkSelection()
                         Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
                     }
-                    is ArtworkGalleryStore.ImportResult.Added -> {
-                        settings.edit().putString(KEY_PENDING_ARTWORK_ID, result.artwork.id).commit()
-                        confirmArtworkUpload(result.artwork)
-                    }
-                    is ArtworkGalleryStore.ImportResult.Duplicate -> {
-                        settings.edit().putString(KEY_PENDING_ARTWORK_ID, result.artwork.id).commit()
-                        confirmArtworkUpload(result.artwork)
-                    }
+                    is ArtworkGalleryStore.ImportResult.Added -> linkImportedArtwork(result.artwork)
+                    is ArtworkGalleryStore.ImportResult.Duplicate -> linkImportedArtwork(result.artwork)
                 }
             }
         }, "gecko-artwork-import").start()
     }
 
-    private fun confirmArtworkUpload(artwork: ArtworkGalleryStore.Artwork) {
-        artwork.remoteUrl?.let { url ->
-            val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
-            if (isAllowedArtworkTarget(targetKey)) {
-                settings.edit().putString(targetKey, url).commit()
-                clearPendingArtworkSelection()
-                Toast.makeText(this, "Existing artwork linked to Studio", Toast.LENGTH_SHORT).show()
-                showPage(PAGE_STUDIO)
-            } else {
-                clearPendingArtworkSelection()
-                Toast.makeText(this, "Artwork is already hosted", Toast.LENGTH_SHORT).show()
-                showPage(PAGE_LIBRARY)
-            }
+    /** Imported artwork is linked by stable reference; the engine hosts and refreshes it automatically. */
+    private fun linkImportedArtwork(artwork: ArtworkGalleryStore.Artwork) {
+        val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
+        val reference = app.geckopresence.host.core.DiscordArtworkPolicy.localReference(artwork.id)
+        clearPendingArtworkSelection()
+        if (reference == null || !isAllowedArtworkTarget(targetKey)) {
+            Toast.makeText(this, "Artwork saved to Gallery", Toast.LENGTH_SHORT).show()
+            showPage(PAGE_LIBRARY)
             return
         }
-        settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
-        if (ArtworkUploadConfigStore.load(this) == null || !ArtworkUploadCredentialVault.hasCredential(this)) {
-            AlertDialog.Builder(this)
-                .setTitle("Cloudflare Worker required")
-                .setMessage("The image is saved locally and its Studio destination has been retained. Configure your Worker URL, public R2 asset domain and private upload token in Settings. The token is stored encrypted on this device.")
-                .setPositiveButton("OPEN SETTINGS") { _, _ -> showPage(PAGE_SETTINGS) }
-                .setNegativeButton("KEEP LOCAL") { _, _ -> clearPendingArtworkSelection(); showPage(PAGE_LIBRARY) }
-                .show()
+        settings.edit().putString(targetKey, reference).commit()
+        showPage(PAGE_STUDIO)
+        if (!ArtworkAutoPublisher.isConfigured(this)) {
+            Toast.makeText(this, "Artwork linked. Save a Discord webhook in Settings so it can be hosted automatically.", Toast.LENGTH_LONG).show()
             return
         }
-        if (settings.getBoolean(ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD, false)) {
-            uploadArtwork(artwork, requireStandingConsent = true)
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Upload artwork publicly?")
-            .setMessage("Gecko will upload '${artwork.displayName}' (${artwork.byteCount / 1024} KiB) to your Cloudflare Worker and R2 bucket. Anyone with the resulting URL may view it. The local copy remains on this device. Continue?")
-            .setNegativeButton("CANCEL") { _, _ -> clearPendingArtworkSelection() }
-            .setPositiveButton("UPLOAD") { _, _ -> uploadArtwork(artwork) }
-            .show()
-    }
-
-    private fun uploadArtwork(
-        artwork: ArtworkGalleryStore.Artwork,
-        requireStandingConsent: Boolean = false,
-    ) {
-        if (artworkUploadInProgress || artworkImportInProgress) return
-        artworkUploadInProgress = true
-        settings.edit().putString(KEY_PENDING_ARTWORK_ID, artwork.id).commit()
-        Toast.makeText(this, "Uploading artwork to your Cloudflare Worker…", Toast.LENGTH_SHORT).show()
+        // Verify hosting in the background so a broken webhook is reported now, not silently later.
         Thread({
-            val consentStillEnabled = !requireStandingConsent || settings.getBoolean(
-                ArtworkAutoPublisher.KEY_AUTO_PUBLIC_UPLOAD,
-                false,
-            )
-            val config = if (consentStillEnabled) ArtworkUploadConfigStore.load(this) else null
-            val token = if (config != null) runCatching {
-                ArtworkUploadCredentialVault.loadForUpload(this)
-            }.getOrNull() else null
-            val file = if (config != null && token != null) ArtworkGalleryStore.file(this, artwork) else null
-            val result = when {
-                !consentStillEnabled -> CloudflareArtworkUploader.Result.Failure("Automatic public-upload consent was revoked before upload started.")
-                config == null -> CloudflareArtworkUploader.Result.Failure("Cloudflare Worker settings are missing or invalid.")
-                token == null -> CloudflareArtworkUploader.Result.Failure("Private Worker token is missing or cannot be decrypted. Save it again in Settings.")
-                file == null -> CloudflareArtworkUploader.Result.Failure("Local artwork file is missing or failed its integrity check.")
-                else -> CloudflareArtworkUploader.upload(file, config, token)
-            }
-            val directUrl = (result as? CloudflareArtworkUploader.Result.Success)?.directUrl
-            val metadataSaved = directUrl != null && ArtworkGalleryStore.markUploaded(this, artwork.id, directUrl)
+            val (hosted, error) = ArtworkAutoPublisher.resolveGalleryReferenceBlocking(this, artwork.id)
             runOnUiThread {
-                artworkUploadInProgress = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                when (result) {
-                    is CloudflareArtworkUploader.Result.Success -> {
-                        if (metadataSaved && directUrl != null) {
-                            val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
-                            if (isAllowedArtworkTarget(targetKey)) {
-                                settings.edit().putString(targetKey, directUrl).commit()
-                                clearPendingArtworkSelection()
-                                Toast.makeText(this, "Artwork uploaded and inserted into Studio", Toast.LENGTH_LONG).show()
-                                showPage(PAGE_STUDIO)
-                            } else {
-                                clearPendingArtworkSelection()
-                                Toast.makeText(this, "Artwork uploaded and saved to Gallery", Toast.LENGTH_LONG).show()
-                                showPage(PAGE_LIBRARY)
-                            }
-                        } else {
-                            Toast.makeText(this, "Upload succeeded but local Gallery metadata could not be updated", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                    is CloudflareArtworkUploader.Result.Failure ->
-                        Toast.makeText(this, "${result.message} Pending artwork selection was preserved for retry.", Toast.LENGTH_LONG).show()
-                }
+                Toast.makeText(
+                    this,
+                    if (hosted != null) "Artwork linked and hosted automatically" else (error ?: "Artwork hosting failed"),
+                    Toast.LENGTH_LONG,
+                ).show()
             }
-        }, "gecko-artwork-upload").start()
+        }, "gecko-artwork-verify").start()
     }
 
     private fun clearPendingArtworkSelection() {
         settings.edit()
-            .remove(KEY_PENDING_ARTWORK_TARGET)
-            .remove(KEY_PENDING_ARTWORK_ID)
-            .apply()
-    }
-
-    private fun resumePendingArtworkUpload() {
-        val pendingId = settings.getString(KEY_PENDING_ARTWORK_ID, null) ?: return
-        val artwork = ArtworkGalleryStore.list(this).firstOrNull { it.id == pendingId }
-        if (artwork == null) {
-            clearPendingArtworkSelection()
-            Toast.makeText(this, "Pending artwork was not found in Gallery", Toast.LENGTH_LONG).show()
-            return
-        }
-        confirmArtworkUpload(artwork)
-    }
-
-    private fun restoreCompletedPendingArtwork() {
-        val pendingId = settings.getString(KEY_PENDING_ARTWORK_ID, null) ?: return
-        val targetKey = settings.getString(KEY_PENDING_ARTWORK_TARGET, "").orEmpty()
-        if (!isAllowedArtworkTarget(targetKey)) return
-        val hostedUrl = ArtworkGalleryStore.list(this)
-            .firstOrNull { it.id == pendingId }
-            ?.remoteUrl
-            ?: return
-        settings.edit()
-            .putString(targetKey, hostedUrl)
             .remove(KEY_PENDING_ARTWORK_TARGET)
             .remove(KEY_PENDING_ARTWORK_ID)
             .apply()
@@ -1610,12 +1401,13 @@ class MainActivity : Activity() {
      */
     private fun loadArtworkPreview(target: ImageView, reference: String) {
         val key = reference.trim()
+        val galleryId = app.geckopresence.host.core.DiscordArtworkPolicy.localId(key) ?: key
         if (target.tag == key && target.drawable != null) return
         target.tag = key
         target.setImageResource(android.R.drawable.ic_menu_gallery)
         if (key.isBlank()) return
         val artwork = ArtworkGalleryStore.list(this).firstOrNull {
-            it.id == key || it.remoteUrl.equals(key, ignoreCase = false)
+            it.id == galleryId
         } ?: return
         val file = ArtworkGalleryStore.previewFile(this, artwork) ?: return
         artworkPreviewExecutor().execute {
@@ -2212,7 +2004,6 @@ class MainActivity : Activity() {
         private const val REQUEST_EXPORT_CRASH_BUNDLE = 4402
         private const val REQUEST_DISCORD_SESSION_IMPORT = 4403
         private const val REQUEST_ARTWORK_PICKER = 4404
-        private const val KEY_IMGUR_CLIENT_ID = "artwork_imgur_client_id"
         private const val STUDIO_SYNC_DEBOUNCE_MS = 700L
         private const val TAG = "GeckoPresenceUI"
 

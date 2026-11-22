@@ -13,14 +13,6 @@ fun main() {
     check(ArtworkMediaPolicy.hasValidDimensions(8192, 4882))
     check(!ArtworkMediaPolicy.hasValidDimensions(8192, 8192))
     check(!ArtworkMediaPolicy.hasValidDimensions(0, 10))
-    check(ArtworkMediaPolicy.isSafeImgurUrl("https://i.imgur.com/abc123.png"))
-    check(!ArtworkMediaPolicy.isSafeImgurUrl("http://i.imgur.com/abc123.png"))
-    check(!ArtworkMediaPolicy.isSafeImgurUrl("https://i.imgur.com.evil.example/abc.png"))
-    check(!ArtworkMediaPolicy.isSafeImgurUrl("https://user@i.imgur.com/abc.png"))
-    check(!ArtworkMediaPolicy.isSafeImgurUrl("https://i.imgur.com:444/abc.png"))
-    check(!ArtworkMediaPolicy.isSafeImgurUrl("https://i.imgur.com/abc.png#fragment"))
-    check(ArtworkMediaPolicy.isValidClientId("0123456789abcdef"))
-    check(!ArtworkMediaPolicy.isValidClientId("short"))
     check(ArtworkMediaPolicy.isValidStoredFileName("01234567-89ab-cdef-0123-456789abcdef", "01234567-89ab-cdef-0123-456789abcdef.png"))
     check(!ArtworkMediaPolicy.isValidStoredFileName("../../etc/passwd", "../../etc/passwd.png"))
     check(ArtworkMediaPolicy.mimeMatchesExtension("image/jpeg", "art.jpg"))
@@ -33,5 +25,5 @@ fun main() {
             check(ArtworkMediaPolicy.detectImage(bytes) == null || bytes.size >= 8)
         }
     }
-    println("ArtworkMediaPolicySelfTest: format, dimension, URL, path and 20,000 malformed-input cases passed")
+    println("ArtworkMediaPolicySelfTest: format, dimension, path and 20,000 malformed-input cases passed")
 }

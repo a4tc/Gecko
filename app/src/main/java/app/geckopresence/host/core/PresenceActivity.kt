@@ -73,7 +73,7 @@ data class PresenceActivity(
         }
         listOfNotNull(largeImage, smallImage).forEachIndexed { index, asset ->
             val slot = if (index == 0 && largeImage != null) "large" else "small"
-            if (!isAllowedImageReference(asset.image)) add("$slot image reference must be HTTPS, a Discord media-proxy reference, or an application asset ID")
+            if (!isAllowedImageReference(asset.image)) add("$slot image reference must be HTTPS, a Discord media-proxy reference, a Gecko gallery reference, or an application asset ID")
             if (asset.tooltip != null && asset.tooltip.length !in 2..128) add("$slot image tooltip must contain 2–128 characters")
             if (asset.clickUrl != null && !isSafeHttpsUrl(asset.clickUrl, 256)) add("$slot image click URL must be safe HTTPS and at most 256 characters")
         }
@@ -81,6 +81,7 @@ data class PresenceActivity(
 
     private fun isAllowedImageReference(value: String): Boolean {
         if (value.isBlank() || value.length > 300 || value.any(Char::isWhitespace)) return false
+        if (DiscordArtworkPolicy.isLocalReference(value)) return true
         if (value.startsWith("mp:", ignoreCase = true)) return value.substring(3).isNotBlank()
         if (value.all(Char::isDigit)) return value.length in 16..22
         if (APPLICATION_ASSET_KEY_PATTERN.matches(value)) return true

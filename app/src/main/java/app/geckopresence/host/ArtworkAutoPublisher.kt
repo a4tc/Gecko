@@ -10,26 +10,38 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.net.Uri
 import app.geckopresence.host.core.ArtworkMediaPolicy
-import app.geckopresence.host.core.ArtworkUploadPolicy
+import app.geckopresence.host.core.DiscordArtworkPolicy
+import app.geckopresence.host.core.DiscordTokenInputPolicy
 import app.geckopresence.host.core.PresenceAsset
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
 import java.util.concurrent.Executors
 
-/** Resolves app/media artwork and publishes it only after the user enables standing public-upload consent. */
+/**
+ * Resolves app/media/gallery artwork into a Discord media-proxy reference ("mp:...") without any
+ * third-party host. Images go to the user's own private webhook, then are registered with Discord's
+ * external-assets endpoint. Everything runs on one background thread and never blocks presence tracking.
+ */
 object ArtworkAutoPublisher {
-    const val KEY_AUTO_PUBLIC_UPLOAD = "artwork_auto_public_upload_cloudflare_v1"
+    const val KEY_AUTO_ARTWORK = "artwork_auto_discord_v1"
     private const val PREFS_SETTINGS = "gpb_settings"
-    private const val PREFS_AUTO_CACHE = "gpb_artwork_auto_cache"
-    private const val AUTO_CACHE_PREFIX = "auto:"
-    private const val MAX_AUTO_CACHE_ENTRIES = 200
+    private const val PREFS_CACHE = "gpb_artwork_discord_cache_v2"
+    private const val LEGACY_PREFS_CACHE = "gpb_artwork_auto_cache"
+    private const val CACHE_PREFIX = "auto:"
+    private const val MAX_CACHE_ENTRIES = 200
     private const val MAX_DECODE_EDGE = 1_024
 
+    private val publishLock = Any()
     private val executor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "gecko-artwork-auto-publisher").apply { isDaemon = true }
     }
+
+    /** Automatic artwork is ON by default and only active once a webhook has been saved. */
+    fun isEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_ARTWORK, true) &&
+            isConfigured(context)
+
+    fun isConfigured(context: Context): Boolean = loadWebhook(context) != null
 
     fun resolveMediaArtwork(
         context: Context,
@@ -39,7 +51,7 @@ object ArtworkAutoPublisher {
     ) {
         val app = context.applicationContext
         executor.execute {
-            if (!isStandingConsentEnabled(app)) {
+            if (!isEnabled(app)) {
                 onResolved(null, null)
                 return@execute
             }
@@ -62,7 +74,7 @@ object ArtworkAutoPublisher {
     ) {
         val app = context.applicationContext
         executor.execute {
-            if (!isStandingConsentEnabled(app)) {
+            if (!isEnabled(app)) {
                 onResolved(null, null)
                 return@execute
             }
@@ -74,24 +86,37 @@ object ArtworkAutoPublisher {
         }
     }
 
-    private fun isStandingConsentEnabled(context: Context): Boolean = context
-        .getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
-        .getBoolean(KEY_AUTO_PUBLIC_UPLOAD, false)
+    /** Resolves a stable "gecko:<gallery id>" reference into a fresh media-proxy reference. */
+    fun resolveGalleryReference(
+        context: Context,
+        galleryId: String,
+        onResolved: (String?, String?) -> Unit,
+    ) {
+        val app = context.applicationContext
+        executor.execute {
+            val result = runCatching { resolveGalleryReferenceBlocking(app, galleryId) }
+                .getOrElse { null to "Gallery artwork processing failed · ${it.javaClass.simpleName}" }
+            onResolved(result.first, result.second)
+        }
+    }
 
-    /** Automatic uploads use a bounded SHA-256 URL cache, not the user's 40-item manual Gallery. */
+    /** For callers that already run on their own worker thread (Gallery / Studio upload). */
+    fun resolveGalleryReferenceBlocking(context: Context, galleryId: String): Pair<String?, String?> {
+        val app = context.applicationContext
+        if (!isConfigured(app)) return null to "Save a Discord webhook in Settings before artwork can be published"
+        val artwork = ArtworkGalleryStore.list(app).firstOrNull { it.id == galleryId }
+            ?: return null to "Gallery artwork no longer exists"
+        val file = ArtworkGalleryStore.file(app, artwork)
+            ?: return null to "Gallery artwork file is missing or failed its integrity check"
+        val bytes = runCatching { file.readBytes() }.getOrNull()
+            ?: return null to "Gallery artwork could not be read"
+        return publishBytes(app, bytes)
+    }
+
     private fun publishBitmap(context: Context, bitmap: Bitmap, displayName: String): Pair<PresenceAsset?, String?> {
         if (!ArtworkMediaPolicy.hasValidDimensions(bitmap.width, bitmap.height)) {
             return null to "Artwork dimensions are invalid or exceed 40 megapixels"
         }
-        if (!isStandingConsentEnabled(context)) return null to null
-
-        val config = ArtworkUploadConfigStore.load(context)
-            ?: return null to "Configure your artwork host before enabling automatic uploads"
-        val token = runCatching { ArtworkUploadCredentialVault.loadForUpload(context) }
-            .getOrNull()
-            ?.takeIf(ArtworkUploadPolicy::isValidUploadToken)
-            ?: return null to "Save a valid private artwork-host token before uploading"
-
         val boundedBitmap = downsample(bitmap, MAX_DECODE_EDGE)
         val encoded = try {
             ByteArrayOutputStream().use { output ->
@@ -102,89 +127,102 @@ object ArtworkAutoPublisher {
         } finally {
             if (boundedBitmap !== bitmap) boundedBitmap.recycle()
         }
-        if (encoded.isEmpty() || encoded.size > ArtworkMediaPolicy.MAX_FILE_BYTES) {
+        val (reference, error) = publishBytes(context, encoded)
+        return reference?.let { PresenceAsset(it, displayName.take(80)) to null } ?: (null to error)
+    }
+
+    /** Returns (mp reference, null) or (null, human-readable reason). Serialized so one image uploads once. */
+    private fun publishBytes(context: Context, bytes: ByteArray): Pair<String?, String?> = synchronized(publishLock) {
+        if (bytes.isEmpty() || bytes.size > ArtworkMediaPolicy.MAX_FILE_BYTES) {
             return null to "Artwork exceeds the 8 MiB upload limit"
         }
+        val webhook = loadWebhook(context)
+            ?: return null to "Save a Discord webhook in Settings before artwork can be published"
+        val token = runCatching { DiscordCredentialVault.loadForConnection(context) }.getOrNull()
+            ?.let(DiscordTokenInputPolicy::normalize)
+            ?: return null to "Save your Discord credential before artwork can be registered"
 
-        val hash = ArtworkMediaPolicy.sha256(encoded)
-        cachedUrl(context, hash, config.assetBaseUrl)?.let { return PresenceAsset(it, displayName.take(80)) to null }
-        if (!isStandingConsentEnabled(context)) {
-            return null to "Public upload consent was revoked before artwork upload started"
-        }
+        val hash = ArtworkMediaPolicy.sha256(bytes)
+        val now = System.currentTimeMillis()
+        val cached = readCache(context, hash)
+        if (cached != null && DiscordArtworkPolicy.isFresh(cached.createdAt, now)) return cached.reference to null
 
-        val stagedFile = stageTemporaryArtwork(context, hash, encoded)
-            ?: return null to "Could not stage artwork in private temporary storage"
-        val upload = try {
-            CloudflareArtworkUploader.upload(stagedFile, config, token)
-        } finally {
-            stagedFile.delete()
-        }
-        return when (upload) {
-            is CloudflareArtworkUploader.Result.Success -> {
-                val url = upload.directUrl
-                if (!isStandingConsentEnabled(context)) {
-                    null to "Public-upload consent was revoked during upload; future uploads are disabled"
-                } else if (url.isNullOrBlank() || !cacheUrl(context, hash, config.assetBaseUrl, url)) {
-                    null to "Artwork uploaded but its local URL cache could not be updated"
+        return when (val result = DiscordArtworkUploader.uploadAndRegister(webhook, BuildConfig.DISCORD_APP_ID, token, bytes, hash)) {
+            is DiscordArtworkUploader.Result.Success -> {
+                val registered = result.value
+                if (!writeCache(context, hash, registered.mediaProxyReference, registered.messageId, now, webhook)) {
+                    null to "Artwork was registered but its local cache could not be updated"
                 } else {
-                    PresenceAsset(url, displayName.take(80)) to null
+                    // The replaced attachment is obsolete: remove it from the webhook channel.
+                    cached?.messageId?.let { DiscordArtworkUploader.deleteWebhookMessage(webhook, it) }
+                    registered.mediaProxyReference to null
                 }
             }
-            is CloudflareArtworkUploader.Result.Failure -> null to upload.message
+            is DiscordArtworkUploader.Result.Failure -> null to result.message
         }
     }
 
-    private fun cachedUrl(context: Context, hash: String, assetBaseUrl: String): String? {
+    private fun loadWebhook(context: Context): String? = runCatching {
+        ArtworkUploadCredentialVault.loadForUpload(context)
+    }.getOrNull()?.let(DiscordArtworkPolicy::normalizeWebhookUrl)
+
+    private data class CacheEntry(val reference: String, val messageId: String, val createdAt: Long)
+
+    private fun readCache(context: Context, hash: String): CacheEntry? {
         if (!Regex("^[a-f0-9]{64}$").matches(hash)) return null
-        val prefs = context.getSharedPreferences(PREFS_AUTO_CACHE, Context.MODE_PRIVATE)
-        val key = AUTO_CACHE_PREFIX + hash
+        val prefs = cachePrefs(context)
+        val key = CACHE_PREFIX + hash
         val raw = prefs.getString(key, null) ?: return null
-        val url = runCatching { JSONObject(raw).optString("url") }.getOrNull()
-        if (url.isNullOrBlank() ||
-            !ArtworkUploadPolicy.isSafeCloudflareAssetUrl(url, assetBaseUrl) ||
-            !ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(url, hash)
+        val json = runCatching { JSONObject(raw) }.getOrNull()
+        val reference = json?.optString("mp").orEmpty()
+        val messageId = json?.optString("messageId").orEmpty()
+        val createdAt = json?.optLong("createdAt") ?: 0L
+        if (!reference.startsWith("mp:") || DiscordArtworkPolicy.toMediaProxyReference(reference.removePrefix("mp:")) == null ||
+            !DiscordArtworkPolicy.isValidMessageId(messageId)
         ) {
             prefs.edit().remove(key).apply()
             return null
         }
-        return url
+        return CacheEntry(reference, messageId, createdAt)
     }
 
-    private fun cacheUrl(context: Context, hash: String, assetBaseUrl: String, url: String): Boolean {
-        if (!Regex("^[a-f0-9]{64}$").matches(hash) ||
-            !ArtworkUploadPolicy.isSafeCloudflareAssetUrl(url, assetBaseUrl) ||
-            !ArtworkUploadPolicy.isExpectedCloudflareAssetUrl(url, hash)
-        ) return false
-        val prefs = context.getSharedPreferences(PREFS_AUTO_CACHE, Context.MODE_PRIVATE)
-        val key = AUTO_CACHE_PREFIX + hash
-        val value = JSONObject().put("url", url).put("createdAt", System.currentTimeMillis()).toString()
-        if (!prefs.edit().putString(key, value).commit()) return false
+    private fun writeCache(
+        context: Context,
+        hash: String,
+        reference: String,
+        messageId: String,
+        now: Long,
+        webhook: String,
+    ): Boolean {
+        if (!Regex("^[a-f0-9]{64}$").matches(hash)) return false
+        val prefs = cachePrefs(context)
+        val value = JSONObject().put("mp", reference).put("messageId", messageId).put("createdAt", now).toString()
+        if (!prefs.edit().putString(CACHE_PREFIX + hash, value).commit()) return false
 
-        val staleKeys = prefs.all.entries.asSequence()
-            .filter { it.key.startsWith(AUTO_CACHE_PREFIX) }
-            .mapNotNull { entry ->
-                val createdAt = runCatching { JSONObject(entry.value as? String ?: "{}").optLong("createdAt") }.getOrDefault(0L)
-                entry.key to createdAt
+        val entries = prefs.all.entries.asSequence()
+            .filter { it.key.startsWith(CACHE_PREFIX) }
+            .map { entry ->
+                val json = runCatching { JSONObject(entry.value as? String ?: "{}") }.getOrNull()
+                Triple(entry.key, json?.optLong("createdAt") ?: 0L, json?.optString("messageId").orEmpty())
             }
             .sortedBy { it.second }
             .toList()
-        if (staleKeys.size > MAX_AUTO_CACHE_ENTRIES) {
+        if (entries.size > MAX_CACHE_ENTRIES) {
+            val evicted = entries.take(entries.size - MAX_CACHE_ENTRIES)
             val editor = prefs.edit()
-            staleKeys.take(staleKeys.size - MAX_AUTO_CACHE_ENTRIES).forEach { (staleKey, _) -> editor.remove(staleKey) }
+            evicted.forEach { (staleKey, _, staleMessage) ->
+                editor.remove(staleKey)
+                if (staleMessage.isNotBlank()) DiscordArtworkUploader.deleteWebhookMessage(webhook, staleMessage)
+            }
             editor.apply()
         }
         return true
     }
 
-    private fun stageTemporaryArtwork(context: Context, hash: String, bytes: ByteArray): File? = runCatching {
-        val cacheRoot = context.cacheDir.canonicalFile
-        val directory = File(cacheRoot, "gecko-auto-artwork").apply { mkdirs() }.canonicalFile
-        if (directory.parentFile != cacheRoot) return null
-        val target = File(directory, "$hash.png").canonicalFile
-        if (target.parentFile != directory) return null
-        FileOutputStream(target).use { it.write(bytes) }
-        target.takeIf { it.isFile && it.length() == bytes.size.toLong() }
-    }.getOrNull()
+    private fun cachePrefs(context: Context) = context.applicationContext.also {
+        // Pre-0.7 cache held third-party URLs; it is obsolete.
+        it.deleteSharedPreferences(LEGACY_PREFS_CACHE)
+    }.getSharedPreferences(PREFS_CACHE, Context.MODE_PRIVATE)
 
     private fun extractMediaArtwork(context: Context, metadata: MediaMetadata): Bitmap? {
         val uriCandidates = listOfNotNull(
