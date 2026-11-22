@@ -75,9 +75,10 @@ object DiscordArtworkPolicy {
 
     fun toMediaProxyReference(externalAssetPath: String): String? {
         var path = externalAssetPath.trim()
+        val wasMediaProxyReference = path.startsWith("mp:", ignoreCase = true)
         var trustedAttachmentPath = false
 
-        if (path.startsWith("mp:", ignoreCase = true)) {
+        if (wasMediaProxyReference) {
             path = path.substring(3)
         }
 
@@ -110,7 +111,8 @@ object DiscordArtworkPolicy {
         val mediaPath = path.substringBefore('?')
         val segments = mediaPath.split('/').filter { it.isNotEmpty() }
         trustedAttachmentPath = trustedAttachmentPath ||
-            (mediaPath.startsWith("attachments/") &&
+            (wasMediaProxyReference &&
+                mediaPath.startsWith("attachments/") &&
                 segments.size >= 4 &&
                 path.length in 10..MAX_MP_PATH_LENGTH &&
                 path.none { it.isWhitespace() || it.isISOControl() || it == '#' })
