@@ -42,7 +42,11 @@ fun main() {
     check(DiscordArtworkPolicy.toMediaProxyReference("external/abc123/https/cdn.discordapp.com/attachments/1/2/a.png") ==
         "mp:external/abc123/https/cdn.discordapp.com/attachments/1/2/a.png")
     check(DiscordArtworkPolicy.toMediaProxyReference("attachments/1/2/a.png") == null)
-    check(DiscordArtworkPolicy.toMediaProxyReference("external/" + "a".repeat(400)) == null)
+    check(DiscordArtworkPolicy.toMediaProxyReference("/external/abc123/https/cdn.discordapp.com/attachments/1/2/a.png") ==
+        "mp:external/abc123/https/cdn.discordapp.com/attachments/1/2/a.png")
+    check(DiscordArtworkPolicy.toMediaProxyReference("external/" + "a".repeat(350)) ==
+        "mp:external/" + "a".repeat(350))
+    check(DiscordArtworkPolicy.toMediaProxyReference("external/" + "a".repeat(513)) == null)
     check(DiscordArtworkPolicy.toMediaProxyReference("external/a b") == null)
 
     // Local gallery references

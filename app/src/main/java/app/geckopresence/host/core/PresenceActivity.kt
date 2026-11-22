@@ -80,7 +80,7 @@ data class PresenceActivity(
     }
 
     private fun isAllowedImageReference(value: String): Boolean {
-        if (value.isBlank() || value.length > 300 || value.any(Char::isWhitespace)) return false
+        if (value.isBlank() || value.length > 520 || value.any(Char::isWhitespace)) return false
         if (DiscordArtworkPolicy.isLocalReference(value)) return true
         if (value.startsWith("mp:", ignoreCase = true)) return value.substring(3).isNotBlank()
         if (value.all(Char::isDigit)) return value.length in 16..22

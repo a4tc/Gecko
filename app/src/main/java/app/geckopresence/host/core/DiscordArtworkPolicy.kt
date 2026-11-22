@@ -17,7 +17,7 @@ object DiscordArtworkPolicy {
     const val MP_REFERENCE_TTL_MS: Long = 12L * 60L * 60L * 1000L
 
     private const val MAX_CDN_URL_LENGTH = 1_024
-    private const val MAX_MP_PATH_LENGTH = 296 // "mp:" + path must stay within the 300 character image-reference limit
+    private const val MAX_MP_PATH_LENGTH = 512 // "mp:" + path must stay within the 300 character image-reference limit
 
     private val webhookHosts = setOf("discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com")
     private val cdnHosts = setOf("cdn.discordapp.com", "media.discordapp.net")
@@ -73,8 +73,11 @@ object DiscordArtworkPolicy {
             path.length in 10..MAX_MP_PATH_LENGTH &&
             path.none { it.isWhitespace() || it.isISOControl() }
 
-    fun toMediaProxyReference(externalAssetPath: String): String? =
-        if (isValidExternalAssetPath(externalAssetPath)) "mp:$externalAssetPath" else null
+    fun toMediaProxyReference(externalAssetPath: String): String? {
+        // Discord may return the media-proxy path with a leading slash.
+        val path = externalAssetPath.removePrefix("/")
+        return if (isValidExternalAssetPath(path)) "mp:$path" else null
+    }
 
     fun localReference(galleryId: String): String? =
         if (localIdPattern.matches(galleryId)) "$LOCAL_PREFIX$galleryId" else null
