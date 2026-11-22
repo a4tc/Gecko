@@ -66,6 +66,22 @@ object DiscordGatewayProtocolSelfTest {
         check(timestamps["end"] == 1_700_003_600_000L)
         val assets = wireActivity["assets"] as Map<*, *>
         check(assets["large_image"] == "https://cdn.example/large.webp")
+
+        // Registered gallery references are internal mp: values; the outgoing Gateway
+        // payload must contain the full media-proxy URL, not the mp: event representation.
+        val mpActivity = PresenceActivity(
+            name = "External artwork",
+            largeImage = PresenceAsset(
+                "mp:external/abc123/https/cdn.discordapp.com/attachments/1/2/cover.webp",
+                "Registered artwork",
+            ),
+        )
+        val mpUpdate = DiscordGatewayProtocol.presenceUpdate(mpActivity, 1569772369344602173L)
+        val mpData = mpUpdate.data as Map<*, *>
+        val mpWireActivity = (mpData["activities"] as List<*>).single() as Map<*, *>
+        val mpAssets = mpWireActivity["assets"] as Map<*, *>
+        check(mpAssets["large_image"] ==
+            "https://media.discordapp.net/external/abc123/https/cdn.discordapp.com/attachments/1/2/cover.webp")
         check(assets["large_text"] == "Large artwork")
         check(assets["large_url"] == "https://example.com/large")
         check(assets["small_image"] == "https://cdn.example/small.webp")

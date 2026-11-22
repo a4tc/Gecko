@@ -109,6 +109,20 @@ object DiscordArtworkPolicy {
         return "mp:$path"
     }
 
+    /**
+     * Convert an internal media-proxy reference to the external URL form expected when
+     * sending a Gateway Activity Update. Discord returns the mp: form in Gateway events,
+     * but expects the full media-proxy URL when the client supplies an external image.
+     */
+    fun toGatewayImageValue(reference: String): String {
+        if (!reference.startsWith("mp:", ignoreCase = true)) return reference
+        val path = reference.substring(3)
+        if (path.isBlank() || path.length > MAX_MP_PATH_LENGTH ||
+            path.any { it.isWhitespace() || it.isISOControl() || it == '#' }) return reference
+        val resolved = "https://media.discordapp.net/$path"
+        return if (toMediaProxyReference(resolved) == "mp:$path") resolved else reference
+    }
+
     fun localReference(galleryId: String): String? =
         if (localIdPattern.matches(galleryId)) "$LOCAL_PREFIX$galleryId" else null
 

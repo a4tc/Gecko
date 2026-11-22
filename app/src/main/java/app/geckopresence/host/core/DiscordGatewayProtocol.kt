@@ -103,12 +103,12 @@ object DiscordGatewayProtocol {
 
         val assets = buildMap<String, Any> {
             largeImage?.let { image ->
-                put("large_image", image.image)
+                put("large_image", DiscordArtworkPolicy.toGatewayImageValue(image.image))
                 image.tooltip?.let { put("large_text", it) }
                 image.clickUrl?.let { put("large_url", it) }
             }
             smallImage?.let { image ->
-                put("small_image", image.image)
+                put("small_image", DiscordArtworkPolicy.toGatewayImageValue(image.image))
                 image.tooltip?.let { put("small_text", it) }
                 image.clickUrl?.let { put("small_url", it) }
             }

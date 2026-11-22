@@ -49,6 +49,16 @@ fun main() {
     check(DiscordArtworkPolicy.toMediaProxyReference("external/" + "a".repeat(513)) == null)
     check(DiscordArtworkPolicy.toMediaProxyReference("external/a b") == null)
 
+    // Gateway outbound form: internal mp: references become full media-proxy URLs.
+    val externalPath = "external/abc123/https/cdn.discordapp.com/attachments/1/2/a.png"
+    check(DiscordArtworkPolicy.toGatewayImageValue("mp:$externalPath") ==
+        "https://media.discordapp.net/$externalPath")
+    check(DiscordArtworkPolicy.toGatewayImageValue("https://images.example.com/cover.png") ==
+        "https://images.example.com/cover.png")
+    check(DiscordArtworkPolicy.toGatewayImageValue("gecko:01234567-89ab-cdef-0123-456789abcdef") ==
+        "gecko:01234567-89ab-cdef-0123-456789abcdef")
+    check(DiscordArtworkPolicy.toGatewayImageValue("mp:invalid path") == "mp:invalid path")
+
     // Local gallery references
     val galleryId = "01234567-89ab-cdef-0123-456789abcdef"
     check(DiscordArtworkPolicy.localReference(galleryId) == "gecko:$galleryId")

@@ -36,7 +36,7 @@ Per-app profiles can override activity type, label, details, state, stream URL, 
 
 ## Artwork policy
 
-Artwork has three paths: (1) Upload Discord application assets in the Developer Portal and reference the asset key in Gecko; no opaque asset ID needs to be copied. (2) Enter a public HTTPS image URL or Discord `mp:` media-proxy reference when Discord can resolve it. (3) Import to the private local gallery and explicitly confirm upload to the user-configured Imgur Client-ID; the resulting URL is public. Gecko does not automate undocumented Discord external-assets registration endpoints.
+Artwork supports application asset keys, public HTTPS image URLs, and Gecko gallery uploads. Gallery uploads are registered through Discord external-assets and cached internally as `mp:` references. At the Gateway serialization boundary, Gecko converts those internal references to `https://media.discordapp.net/...` URLs before sending the Activity Update; Discord returns `mp:` references in Gateway events. The external-assets registration endpoint is an undocumented compatibility surface and may change without notice.
 
 ## Dependencies
 
