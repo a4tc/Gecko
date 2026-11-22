@@ -67,26 +67,53 @@ object DiscordArtworkPolicy {
             uri.rawPath.orEmpty().startsWith("/attachments/")
     }
 
-    /** external_asset_path as returned by Discord's external-assets endpoint. */
-    fun isValidExternalAssetPath(path: String): Boolean =
-        path.startsWith("external/") &&
-            path.length in 10..MAX_MP_PATH_LENGTH &&
-            path.none { it.isWhitespace() || it.isISOControl() }
+    /** external_asset_path returned by Discord's external-assets endpoint. */
+    fun isValidExternalAssetPath(path: String): Boolean {
+        if (path.length !in 10..MAX_MP_PATH_LENGTH) return false
+        if (path.any { it.isWhitespace() || it.isISOControl() || it == '#' }) return false
+
+        val mediaPath = path.substringBefore('?')
+        val validExternal = mediaPath.startsWith("external/")
+        val attachmentSegments = mediaPath.split('/').filter { it.isNotEmpty() }
+        val validAttachment = mediaPath.startsWith("attachments/") &&
+            attachmentSegments.size >= 4
+
+        if (!validExternal && !validAttachment) return false
+
+        // Query strings are only meaningful for signed attachment URLs.
+        if ('?' in path) {
+            if (!validAttachment) return false
+            val query = path.substringAfter('?')
+            if (query.isBlank() || query.any { it.isWhitespace() || it.isISOControl() }) {
+                return false
+            }
+        }
+        return true
+    }
 
     fun toMediaProxyReference(externalAssetPath: String): String? {
-        // Normalize Discord path variants without accepting arbitrary URLs or hostnames.
         var path = externalAssetPath.trim()
 
         if (path.startsWith("mp:", ignoreCase = true)) {
             path = path.substring(3)
         }
 
-        path = path.removePrefix("/")
+        // Discord may return the media-proxy URL itself instead of its relative path.
+        if (path.startsWith("https://", ignoreCase = true) ||
+            path.startsWith("http://", ignoreCase = true)
+        ) {
+            val uri = runCatching { URI(path) }.getOrNull() ?: return null
+            if (!uri.scheme.equals("https", ignoreCase = true) ||
+                !uri.host.equals("media.discordapp.net", ignoreCase = true) ||
+                uri.port !in setOf(-1, 443) ||
+                uri.userInfo != null ||
+                uri.rawFragment != null
+            ) return null
 
-        // Some responses may include a media-proxy URL prefix.
-        val externalIndex = path.indexOf("external/")
-        if (externalIndex > 0) {
-            path = path.substring(externalIndex)
+            path = uri.rawPath.orEmpty().removePrefix("/")
+            uri.rawQuery?.let { path += "?$it" }
+        } else {
+            path = path.removePrefix("/")
         }
 
         if (!isValidExternalAssetPath(path)) return null
