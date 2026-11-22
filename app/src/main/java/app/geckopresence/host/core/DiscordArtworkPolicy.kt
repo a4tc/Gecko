@@ -86,7 +86,7 @@ object DiscordArtworkPolicy {
         ) {
             val uri = runCatching { URI(path) }.getOrNull() ?: return null
             if (!uri.scheme.equals("https", ignoreCase = true) ||
-                !uri.host.equals("media.discordapp.net", ignoreCase = true) ||
+                uri.host?.lowercase() !in cdnHosts ||
                 uri.port !in setOf(-1, 443) ||
                 uri.userInfo != null ||
                 uri.rawFragment != null
@@ -105,22 +105,18 @@ object DiscordArtworkPolicy {
             path = path.removePrefix("/")
         }
 
+        // Webhook attachments already live on Discord's CDN. Preserve their
+        // signed query (ex/is/hm) instead of registering them as external assets.
+        val mediaPath = path.substringBefore('?')
+        val segments = mediaPath.split('/').filter { it.isNotEmpty() }
+        trustedAttachmentPath = trustedAttachmentPath ||
+            (mediaPath.startsWith("attachments/") &&
+                segments.size >= 4 &&
+                path.length in 10..MAX_MP_PATH_LENGTH &&
+                path.none { it.isWhitespace() || it.isISOControl() || it == '#' })
+
         if (!isValidExternalAssetPath(path) && !trustedAttachmentPath) return null
         return "mp:$path"
-    }
-
-    /**
-     * Convert an internal media-proxy reference to the external URL form expected when
-     * sending a Gateway Activity Update. Discord returns the mp: form in Gateway events,
-     * but expects the full media-proxy URL when the client supplies an external image.
-     */
-    fun toGatewayImageValue(reference: String): String {
-        if (!reference.startsWith("mp:", ignoreCase = true)) return reference
-        val path = reference.substring(3)
-        if (path.isBlank() || path.length > MAX_MP_PATH_LENGTH ||
-            path.any { it.isWhitespace() || it.isISOControl() || it == '#' }) return reference
-        val resolved = "https://media.discordapp.net/$path"
-        return if (toMediaProxyReference(resolved) == "mp:$path") resolved else reference
     }
 
     fun localReference(galleryId: String): String? =
