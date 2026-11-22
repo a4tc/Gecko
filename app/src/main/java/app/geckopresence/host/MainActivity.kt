@@ -1228,17 +1228,39 @@ class MainActivity : Activity() {
                 }
                 bitmap.recycle()
                 val hash = app.geckopresence.host.core.ArtworkMediaPolicy.sha256(bytes)
-                val result = DiscordArtworkUploader.uploadAndRegister(savedWebhook, BuildConfig.DISCORD_APP_ID, userToken, bytes, hash)
+                val result = DiscordArtworkUploader.uploadAndRegister(
+                    savedWebhook, BuildConfig.DISCORD_APP_ID, userToken, bytes, hash
+                )
                 if (result is DiscordArtworkUploader.Result.Success) {
                     DiscordArtworkUploader.deleteWebhookMessage(savedWebhook, result.value.messageId)
                 }
+
+                val diagnostic = when (result) {
+                    is DiscordArtworkUploader.Result.Success ->
+                        "WEBHOOK TEST / SUCCESS: upload and external-assets registration succeeded."
+                    is DiscordArtworkUploader.Result.Failure ->
+                        "WEBHOOK TEST / FAILURE: ${result.message}"
+                }
+
+                // Store in the same persistent event log displayed by Developer Console.
+                val runtimePrefs = getSharedPreferences(
+                    PresenceEngineService.PREFS_RUNTIME, MODE_PRIVATE
+                )
+                val oldLog = runtimePrefs.getString(
+                    PresenceEngineService.KEY_EVENT_LOG, ""
+                ).orEmpty()
+                val safeDiagnostic =
+                    app.geckopresence.host.core.SensitiveDataRedactor.redact(diagnostic)
+                val updatedLog = (oldLog.split('\n').filter { it.isNotBlank() } +
+                    "${System.currentTimeMillis()} $safeDiagnostic").takeLast(100)
+                runtimePrefs.edit()
+                    .putString(PresenceEngineService.KEY_EVENT_LOG, updatedLog.joinToString("\n"))
+                    .apply()
+
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    val message = when (result) {
-                        is DiscordArtworkUploader.Result.Success -> "Webhook upload and Discord registration both work"
-                        is DiscordArtworkUploader.Result.Failure -> result.message
-                    }
-                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    showPage(PAGE_DEVELOPER)
+                    renderDeveloperStatus()
                 }
             }, "gecko-artwork-test").start()
         }, marginTop(8))
