@@ -100,7 +100,7 @@ object ArtworkGalleryStore {
         val displayName = requestedDisplayName.take(80)
             .replace(Regex("[\\p{Cntrl}/\\\\]"), "_")
             .ifBlank { "Artwork ${current.size + 1}" }
-        val artwork = Artwork(id, displayName, fileName, detected.mimeType, bytes.size.toLong(), digest, null, System.currentTimeMillis())
+        val artwork = Artwork(id, displayName, fileName, detected.mimeType, bytes.size.toLong(), digest, System.currentTimeMillis())
         val saved = preferences(app).edit().putString(PREFIX + id, artwork.toJson().toString()).commit()
         if (!saved) {
             destination.delete()

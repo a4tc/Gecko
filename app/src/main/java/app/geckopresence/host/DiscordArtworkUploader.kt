@@ -71,7 +71,7 @@ object DiscordArtworkUploader {
             "Content-Type: ${format.mimeType}\r\n\r\n").toByteArray(Charsets.UTF_8)
         val tail = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
 
-        val connection = open(DiscordArtworkPolicy.webhookExecuteUrl(webhook), "POST").apply {
+        val connection = connect(DiscordArtworkPolicy.webhookExecuteUrl(webhook), "POST").apply {
             doOutput = true
             setFixedLengthStreamingMode(head.size + bytes.size + tail.size)
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -112,7 +112,7 @@ object DiscordArtworkUploader {
             return Result.Failure("Attachment URL failed validation.")
         }
         val payload = JSONObject().put("urls", JSONArray().put(attachmentUrl)).toString().toByteArray(Charsets.UTF_8)
-        val connection = open(EXTERNAL_ASSETS_ENDPOINT.format(applicationId), "POST").apply {
+        val connection = connect(EXTERNAL_ASSETS_ENDPOINT.format(applicationId), "POST").apply {
             doOutput = true
             setFixedLengthStreamingMode(payload.size)
             setRequestProperty("Content-Type", "application/json")
@@ -145,7 +145,7 @@ object DiscordArtworkUploader {
     fun deleteWebhookMessage(webhookUrl: String, messageId: String): Boolean {
         val webhook = DiscordArtworkPolicy.normalizeWebhookUrl(webhookUrl) ?: return false
         val url = DiscordArtworkPolicy.webhookMessageUrl(webhook, messageId) ?: return false
-        val connection = open(url, "DELETE")
+        val connection = connect(url, "DELETE")
         return try {
             connection.responseCode in 200..299
         } catch (_: Exception) {
@@ -155,7 +155,7 @@ object DiscordArtworkUploader {
         }
     }
 
-    private fun open(url: String, method: String): HttpURLConnection {
+    private fun connect(url: String, method: String): HttpURLConnection {
         val uri = URI(url)
         require(uri.scheme.equals("https", ignoreCase = true) && uri.host.equals("discord.com", ignoreCase = true)) {
             "Only discord.com is allowed"
