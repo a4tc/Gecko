@@ -74,9 +74,23 @@ object DiscordArtworkPolicy {
             path.none { it.isWhitespace() || it.isISOControl() }
 
     fun toMediaProxyReference(externalAssetPath: String): String? {
-        // Discord may return the media-proxy path with a leading slash.
-        val path = externalAssetPath.removePrefix("/")
-        return if (isValidExternalAssetPath(path)) "mp:$path" else null
+        // Normalize Discord path variants without accepting arbitrary URLs or hostnames.
+        var path = externalAssetPath.trim()
+
+        if (path.startsWith("mp:", ignoreCase = true)) {
+            path = path.substring(3)
+        }
+
+        path = path.removePrefix("/")
+
+        // Some responses may include a media-proxy URL prefix.
+        val externalIndex = path.indexOf("external/")
+        if (externalIndex > 0) {
+            path = path.substring(externalIndex)
+        }
+
+        if (!isValidExternalAssetPath(path)) return null
+        return "mp:$path"
     }
 
     fun localReference(galleryId: String): String? =
