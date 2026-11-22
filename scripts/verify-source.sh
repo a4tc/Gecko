@@ -107,7 +107,7 @@ require("gatewayPublisher?.shutdown()" in service, "publisher closes on service 
 require("onSessionRejected =" in service and "DiscordCredentialVault.clear(this@PresenceEngineService)" in service, "rejected Gateway credentials are removed from the local vault")
 require("KEY_MANUAL_ACTIVITY_TYPE" in service and "KEY_MANUAL_LARGE_IMAGE" in service and "KEY_MANUAL_BUTTON1_URL" in service, "manual Studio fields are restored into source model")
 require("endsAtEpochSeconds = update.endsAtEpochSeconds" in mapper and "largeImage = update.largeImage" in mapper and "buttons = update.buttons" in mapper, "manual source mapper preserves advanced Rich Presence fields")
-require("largeImage = assetFrom(largeImage, largeTooltip)" in (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text(), "Studio collects large artwork fields")
+require("largeImage = if (isCustomStatus) null else assetFrom(largeImage, largeTooltip)" in (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text(), "Studio collects large artwork fields and excludes artwork for Custom Status")
 main_activity = (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text()
 require('textField("Start timestamp · Unix seconds (optional, defaults to now)", "studio_draft_start_timestamp"' in main_activity, "Studio exposes an optional start timestamp")
 require('putLong(PresenceEngineService.KEY_MANUAL_START, resolvedStart)' in main_activity, "custom start timestamp persists into the running source")
