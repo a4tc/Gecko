@@ -49,15 +49,19 @@ fun main() {
     check(DiscordArtworkPolicy.toMediaProxyReference("external/" + "a".repeat(513)) == null)
     check(DiscordArtworkPolicy.toMediaProxyReference("external/a b") == null)
 
-    // Gateway outbound form: internal mp: references become full media-proxy URLs.
-    val externalPath = "external/abc123/https/cdn.discordapp.com/attachments/1/2/a.png"
-    check(DiscordArtworkPolicy.toGatewayImageValue("mp:$externalPath") ==
-        "https://media.discordapp.net/$externalPath")
-    check(DiscordArtworkPolicy.toGatewayImageValue("https://images.example.com/cover.png") ==
-        "https://images.example.com/cover.png")
-    check(DiscordArtworkPolicy.toGatewayImageValue("gecko:01234567-89ab-cdef-0123-456789abcdef") ==
-        "gecko:01234567-89ab-cdef-0123-456789abcdef")
-    check(DiscordArtworkPolicy.toGatewayImageValue("mp:invalid path") == "mp:invalid path")
+    // Signed attachment URLs retain their CDN path and signature in mp: form.
+    val signedAttachment =
+        "https://cdn.discordapp.com/attachments/111111111111111111/222222222222222222/cover.png?ex=1&is=2&hm=abc"
+    val signedReference =
+        "mp:attachments/111111111111111111/222222222222222222/cover.png?ex=1&is=2&hm=abc"
+    check(DiscordArtworkPolicy.toMediaProxyReference(signedAttachment) == signedReference)
+    check(DiscordArtworkPolicy.toMediaProxyReference(signedReference) == signedReference)
+    check(DiscordArtworkPolicy.toMediaProxyReference(
+        signedAttachment.replace("cdn.discordapp.com", "media.discordapp.net")
+    ) == signedReference)
+    check(DiscordArtworkPolicy.toMediaProxyReference(
+        signedAttachment.replace("cdn.discordapp.com", "evil.example")
+    ) == null)
 
     // Local gallery references
     val galleryId = "01234567-89ab-cdef-0123-456789abcdef"
