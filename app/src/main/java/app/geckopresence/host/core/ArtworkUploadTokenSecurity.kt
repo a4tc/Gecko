@@ -10,7 +10,8 @@ import javax.crypto.spec.GCMParameterSpec
 object ArtworkUploadTokenPolicy {
     fun normalize(input: String): String? {
         val token = input.trim()
-        return token.takeIf(ArtworkUploadPolicy::isValidUploadToken)
+        if (token.length !in 32..256) return null
+        return token.takeIf { value -> value.all { it.code in 0x21..0x7e } }
     }
 }
 
