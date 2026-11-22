@@ -138,16 +138,12 @@ object ArtworkAutoPublisher {
         }
         val webhook = loadWebhook(context)
             ?: return null to "Save a Discord webhook in Settings before artwork can be published"
-        val token = runCatching { DiscordCredentialVault.loadForConnection(context) }.getOrNull()
-            ?.let(DiscordTokenInputPolicy::normalize)
-            ?: return null to "Save your Discord credential before artwork can be registered"
-
         val hash = ArtworkMediaPolicy.sha256(bytes)
         val now = System.currentTimeMillis()
         val cached = readCache(context, hash)
         if (cached != null && DiscordArtworkPolicy.isFresh(cached.createdAt, now)) return cached.reference to null
 
-        return when (val result = DiscordArtworkUploader.uploadAndRegister(webhook, BuildConfig.DISCORD_APP_ID, token, bytes, hash)) {
+        return when (val result = DiscordArtworkUploader.uploadAndReference(webhook, bytes, hash)) {
             is DiscordArtworkUploader.Result.Success -> {
                 val registered = result.value
                 if (!writeCache(context, hash, registered.mediaProxyReference, registered.messageId, now, webhook)) {

@@ -33,10 +33,8 @@ object DiscordArtworkUploader {
 
     data class Registered(val mediaProxyReference: String, val messageId: String)
 
-    fun uploadAndRegister(
+    fun uploadAndReference(
         webhookUrl: String,
-        applicationId: Long,
-        userToken: String,
         bytes: ByteArray,
         sha256: String,
     ): Result<Registered> {
@@ -44,14 +42,15 @@ object DiscordArtworkUploader {
             is Result.Success -> upload.value
             is Result.Failure -> return upload
         }
-        return when (val registered = registerExternalAsset(applicationId, userToken, hosted.attachmentUrl)) {
-            is Result.Success -> Result.Success(Registered(registered.value, hosted.messageId))
-            is Result.Failure -> {
-                // Registration failed: remove the orphaned attachment instead of leaving it in the channel.
-                deleteWebhookMessage(webhookUrl, hosted.messageId)
-                registered
-            }
+
+        // Keep the signed Discord CDN attachment URL intact.
+        val reference = DiscordArtworkPolicy.toMediaProxyReference(hosted.attachmentUrl)
+        if (reference == null) {
+            deleteWebhookMessage(webhookUrl, hosted.messageId)
+            return Result.Failure("Discord attachment URL could not be converted to an artwork reference.")
         }
+
+        return Result.Success(Registered(reference, hosted.messageId))
     }
 
     fun uploadToWebhook(webhookUrl: String, bytes: ByteArray, sha256: String): Result<Hosted> {
@@ -99,83 +98,6 @@ object DiscordArtworkUploader {
                 return Result.Failure("Discord upload response failed validation.")
             }
             Result.Success(Hosted(url, messageId))
-        } catch (_: Exception) {
-            Result.Failure("Could not reach Discord. Check your connection.")
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    fun registerExternalAsset(applicationId: Long, userToken: String, attachmentUrl: String): Result<String> {
-        if (applicationId <= 0L) return Result.Failure("Discord Application ID is not configured in this build.")
-        if (!DiscordArtworkPolicy.isSafeAttachmentCdnUrl(attachmentUrl)) {
-            return Result.Failure("Attachment URL failed validation.")
-        }
-        val payload = JSONObject().put("urls", JSONArray().put(attachmentUrl)).toString().toByteArray(Charsets.UTF_8)
-        val connection = connect(EXTERNAL_ASSETS_ENDPOINT.format(applicationId), "POST").apply {
-            doOutput = true
-            setFixedLengthStreamingMode(payload.size)
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("Authorization", userToken)
-        }
-        return try {
-            connection.outputStream.use { it.write(payload) }
-            val status = connection.responseCode
-            val body = readBody(connection, status)
-                ?: return Result.Failure("Discord returned an unreadable or oversized response.")
-            when {
-                status == 429 -> return Result.Failure("Discord rate-limited artwork registration. It will be retried.")
-                status == 401 || status == 403 -> return Result.Failure("Discord refused artwork registration (HTTP $status). Check the saved Discord credential and Application ID.")
-                status !in 200..299 -> return Result.Failure("Discord rejected artwork registration (HTTP $status).")
-            }
-            val responseArray = runCatching { JSONArray(body) }.getOrNull()
-                ?: return Result.Failure(
-                    "Discord artwork response was not a JSON array (bodyLength=${body.length})."
-                )
-
-            if (responseArray.length() == 0) {
-                return Result.Failure("Discord artwork response was an empty array.")
-            }
-
-            val firstItem = responseArray.optJSONObject(0)
-                ?: return Result.Failure("Discord artwork response item was not a JSON object.")
-
-            val path = firstItem.opt("external_asset_path") as? String
-                ?: return Result.Failure(
-                    "Discord artwork response had no string external_asset_path."
-                )
-
-            val reference = DiscordArtworkPolicy.toMediaProxyReference(path)
-            if (reference == null) {
-                val hasWhitespace = path.any(Char::isWhitespace)
-                val hasControl = path.any(Char::isISOControl)
-                val hasQuery = path.contains("?")
-                val startsExternal = path.removePrefix("/").startsWith("external/")
-                val trimmed = path.trim()
-                val prefix = trimmed.take(12)
-                    .replace(Regex("[^A-Za-z0-9:/._-]"), "?")
-                val looksLikeUrl = trimmed.startsWith("http://", true) ||
-                    trimmed.startsWith("https://", true)
-                val looksLikeMp = trimmed.startsWith("mp:", true)
-                val looksLikeExternal = trimmed.contains("external/", true)
-                val segments = trimmed.split("/").filter { it.isNotEmpty() }.size
-
-                return Result.Failure(
-                    "DISCORD_ARTWORK_DIAGNOSTIC " +
-                        "pathLength=${path.length}; " +
-                        "prefix=$prefix; " +
-                        "isUrl=$looksLikeUrl; isMpReference=$looksLikeMp; " +
-                        "containsExternal=$looksLikeExternal; " +
-                        "startsExternal=$startsExternal; " +
-                        "leadingSlash=${path.startsWith("/")}; " +
-                        "whitespace=$hasWhitespace; control=$hasControl; " +
-                        "query=$hasQuery; segments=$segments; " +
-                        "slashes=${path.count { it == '/'} }"
-                )
-            }
-
-            Result.Success(reference)
         } catch (_: Exception) {
             Result.Failure("Could not reach Discord. Check your connection.")
         } finally {
