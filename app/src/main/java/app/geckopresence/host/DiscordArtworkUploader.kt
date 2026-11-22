@@ -152,11 +152,26 @@ object DiscordArtworkUploader {
                 val hasControl = path.any(Char::isISOControl)
                 val hasQuery = path.contains("?")
                 val startsExternal = path.removePrefix("/").startsWith("external/")
+                val trimmed = path.trim()
+                val prefix = trimmed.take(12)
+                    .replace(Regex("[^A-Za-z0-9:/._-]"), "?")
+                val looksLikeUrl = trimmed.startsWith("http://", true) ||
+                    trimmed.startsWith("https://", true)
+                val looksLikeMp = trimmed.startsWith("mp:", true)
+                val looksLikeExternal = trimmed.contains("external/", true)
+                val segments = trimmed.split("/").filter { it.isNotEmpty() }.size
+
                 return Result.Failure(
-                    "Discord media-proxy path rejected: length=${path.length}, " +
-                        "startsExternal=$startsExternal, leadingSlash=${path.startsWith("/")}, " +
-                        "whitespace=$hasWhitespace, control=$hasControl, query=$hasQuery, " +
-                        "slashes=${path.count { it == '/' }}."
+                    "DISCORD_ARTWORK_DIAGNOSTIC " +
+                        "pathLength=${path.length}; " +
+                        "prefix=$prefix; " +
+                        "isUrl=$looksLikeUrl; isMpReference=$looksLikeMp; " +
+                        "containsExternal=$looksLikeExternal; " +
+                        "startsExternal=$startsExternal; " +
+                        "leadingSlash=${path.startsWith("/")}; " +
+                        "whitespace=$hasWhitespace; control=$hasControl; " +
+                        "query=$hasQuery; segments=$segments; " +
+                        "slashes=${path.count { it == '/'} }"
                 )
             }
 
