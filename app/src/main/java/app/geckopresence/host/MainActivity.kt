@@ -1213,9 +1213,8 @@ class MainActivity : Activity() {
         card.addView(actionButton("SEND TEST IMAGE", false) {
             val savedWebhook = runCatching { ArtworkUploadCredentialVault.loadForUpload(this) }.getOrNull()
                 ?.let(app.geckopresence.host.core.DiscordArtworkPolicy::normalizeWebhookUrl)
-            val userToken = runCatching { DiscordCredentialVault.loadForConnection(this) }.getOrNull()
-            if (savedWebhook == null || userToken == null) {
-                Toast.makeText(this, "Save both the webhook and your Discord credential first", Toast.LENGTH_LONG).show()
+            if (savedWebhook == null) {
+                Toast.makeText(this, "Save a Discord webhook first", Toast.LENGTH_LONG).show()
                 return@actionButton
             }
             Toast.makeText(this, "Testing the full artwork path…", Toast.LENGTH_SHORT).show()
@@ -1228,16 +1227,22 @@ class MainActivity : Activity() {
                 }
                 bitmap.recycle()
                 val hash = app.geckopresence.host.core.ArtworkMediaPolicy.sha256(bytes)
-                val result = DiscordArtworkUploader.uploadAndRegister(
-                    savedWebhook, BuildConfig.DISCORD_APP_ID, userToken, bytes, hash
+                val result = DiscordArtworkUploader.uploadAndReference(
+                    savedWebhook, bytes, hash
                 )
-                if (result is DiscordArtworkUploader.Result.Success) {
-                    DiscordArtworkUploader.deleteWebhookMessage(savedWebhook, result.value.messageId)
+                val registered = (result as? DiscordArtworkUploader.Result.Success<*>)
+                    ?.value as? DiscordArtworkUploader.Registered
+                if (registered != null) {
+                    DiscordArtworkUploader.deleteWebhookMessage(savedWebhook, registered.messageId)
                 }
 
                 val diagnostic = when (result) {
-                    is DiscordArtworkUploader.Result.Success ->
-                        "WEBHOOK TEST / SUCCESS: upload and external-assets registration succeeded."
+                    is DiscordArtworkUploader.Result.Success<*> ->
+                        if (registered != null) {
+                            "WEBHOOK TEST / SUCCESS: Discord attachment uploaded and artwork reference validated."
+                        } else {
+                            "WEBHOOK TEST / FAILURE: Discord returned an unexpected upload result."
+                        }
                     is DiscordArtworkUploader.Result.Failure ->
                         "WEBHOOK TEST / FAILURE: ${result.message}"
                 }
