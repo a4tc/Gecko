@@ -145,7 +145,7 @@ require("BitmapFactory.Options().apply { inJustDecodeBounds = true }" in gallery
 require('MessageDigest.getInstance("SHA-256")' in gallery and "current.firstOrNull { it.sha256 == digest }" in gallery, "gallery deduplicates images by SHA-256")
 require("linkImportedArtwork" in activity and "Upload artwork publicly?" not in activity, "picked artwork is linked by stable reference; no manual ID paste or per-image dialog")
 auto_artwork = (app / "src/main/java/app/geckopresence/host/ArtworkAutoPublisher.kt").read_text()
-require("KEY_AUTO_ARTWORK" in auto_artwork and "DiscordArtworkUploader.uploadAndRegister" in auto_artwork and "ArtworkUploadCredentialVault" in auto_artwork, "auto artwork uses the user webhook and the Discord-native uploader")
+require("KEY_AUTO_ARTWORK" in auto_artwork and "DiscordArtworkUploader.uploadAndReference" in auto_artwork and "ArtworkUploadCredentialVault.loadForUpload" in auto_artwork, "auto artwork uses the user webhook and the Discord-native uploader")
 require('uri.scheme.equals("content", ignoreCase = true)' in auto_artwork and 'uri.scheme.equals("https", ignoreCase = true)' not in auto_artwork, "media artwork resolver never fetches arbitrary remote metadata URLs")
 require("cacheDir" not in auto_artwork and "ByteArrayOutputStream" in auto_artwork, "auto artwork is processed in memory, never staged on disk")
 require("MAX_CACHE_ENTRIES = 200" in auto_artwork and "ArtworkMediaPolicy.sha256(bytes)" in auto_artwork and "DiscordArtworkPolicy.isFresh" in auto_artwork, "automatic artwork cache is bounded, content-addressed and expires")
