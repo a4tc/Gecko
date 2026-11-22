@@ -129,10 +129,37 @@ object DiscordArtworkUploader {
                 status == 401 || status == 403 -> return Result.Failure("Discord refused artwork registration (HTTP $status). Check the saved Discord credential and Application ID.")
                 status !in 200..299 -> return Result.Failure("Discord rejected artwork registration (HTTP $status).")
             }
-            val path = runCatching { JSONArray(body).getJSONObject(0).getString("external_asset_path") }.getOrNull()
-                ?: return Result.Failure("Discord returned invalid artwork registration data.")
+            val responseArray = runCatching { JSONArray(body) }.getOrNull()
+                ?: return Result.Failure(
+                    "Discord artwork response was not a JSON array (bodyLength=${body.length})."
+                )
+
+            if (responseArray.length() == 0) {
+                return Result.Failure("Discord artwork response was an empty array.")
+            }
+
+            val firstItem = responseArray.optJSONObject(0)
+                ?: return Result.Failure("Discord artwork response item was not a JSON object.")
+
+            val path = firstItem.opt("external_asset_path") as? String
+                ?: return Result.Failure(
+                    "Discord artwork response had no string external_asset_path."
+                )
+
             val reference = DiscordArtworkPolicy.toMediaProxyReference(path)
-                ?: return Result.Failure("Discord returned an unexpected media-proxy path.")
+            if (reference == null) {
+                val hasWhitespace = path.any(Char::isWhitespace)
+                val hasControl = path.any(Char::isISOControl)
+                val hasQuery = path.contains("?")
+                val startsExternal = path.removePrefix("/").startsWith("external/")
+                return Result.Failure(
+                    "Discord media-proxy path rejected: length=${path.length}, " +
+                        "startsExternal=$startsExternal, leadingSlash=${path.startsWith("/")}, " +
+                        "whitespace=$hasWhitespace, control=$hasControl, query=$hasQuery, " +
+                        "slashes=${path.count { it == '/' }}."
+                )
+            }
+
             Result.Success(reference)
         } catch (_: Exception) {
             Result.Failure("Could not reach Discord. Check your connection.")
