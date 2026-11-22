@@ -543,6 +543,10 @@ class MainActivity : Activity() {
         )
         val uriInput = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         val streamUrl = textField("Twitch or YouTube URL (Streaming only)", "studio_draft_stream_url", "", 512, uriInput)
+        val nameLabel = text("ACTIVITY NAME", 10, COLOR_MUTED, true, mono = true)
+        val detailsLabel = text("DETAILS", 10, COLOR_MUTED, true, mono = true)
+        val stateLabel = text("STATE", 10, COLOR_MUTED, true, mono = true)
+        val streamUrlLabel = text("STREAMING URL", 10, COLOR_MUTED, true, mono = true)
         val largeImage = textField("Large image: picked artwork, HTTPS URL, mp: reference, or asset ID", "studio_draft_large_image", "", 300, uriInput)
         val largeTooltip = textField("Large image tooltip", "studio_draft_large_tooltip", "", 128)
         val smallImage = textField("Small image: picked artwork, HTTPS URL, mp: reference, or asset ID", "studio_draft_small_image", "", 300, uriInput)
@@ -562,7 +566,20 @@ class MainActivity : Activity() {
             val activityDetails = details.text.toString().trim()
             val selectedType = app.geckopresence.host.core.PresenceActivityType.entries
                 .getOrElse(activityType.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING }
+            val isCustomStatus = selectedType == app.geckopresence.host.core.PresenceActivityType.CUSTOM_STATUS
+            val isStreaming = selectedType == app.geckopresence.host.core.PresenceActivityType.STREAMING
             previewType.text = selectedType.displayLabel.uppercase()
+
+            nameLabel.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            name.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            detailsLabel.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            details.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            stateLabel.text = if (isCustomStatus) "CUSTOM STATUS TEXT" else "STATE"
+            state.hint = if (isCustomStatus) "Your Discord status text" else "Activity state"
+            streamUrlLabel.visibility = if (isStreaming) View.VISIBLE else View.GONE
+            streamUrl.visibility = if (isStreaming) View.VISIBLE else View.GONE
+            previewArtworkStack.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+
             val preview = app.geckopresence.host.core.PresenceActivityDisplayFormatter.format(
                 type = selectedType,
                 name = activityLabel.ifBlank { "Gecko Presence" },
@@ -571,7 +588,7 @@ class MainActivity : Activity() {
             )
             previewName.text = preview.headline
             previewDetails.text = preview.details ?: "No additional details"
-            previewDetails.visibility = if (preview.details == null) View.GONE else View.VISIBLE
+            previewDetails.visibility = if (isCustomStatus || preview.details == null) View.GONE else View.VISIBLE
             previewState.text = preview.state.orEmpty()
             previewState.visibility = if (preview.state == null) View.GONE else View.VISIBLE
             previewTimestamp.text = startsAt.text.toString().trim().takeIf(String::isNotEmpty)
@@ -605,17 +622,17 @@ class MainActivity : Activity() {
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
-        editor.addView(text("ACTIVITY NAME", 10, COLOR_MUTED, true, mono = true), marginTop(16))
+        editor.addView(nameLabel, marginTop(16))
         editor.addView(name, marginTop(6))
-        editor.addView(text("DETAILS", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        editor.addView(detailsLabel, marginTop(12))
         editor.addView(details, marginTop(6))
-        editor.addView(text("STATE", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        editor.addView(stateLabel, marginTop(12))
         editor.addView(state, marginTop(6))
         editor.addView(text("ACTIVITY TYPE", 10, COLOR_MUTED, true, mono = true), marginTop(12))
         editor.addView(activityType, marginTop(6))
         editor.addView(text("ACCOUNT STATUS", 10, COLOR_MUTED, true, mono = true), marginTop(12))
         editor.addView(accountStatus, marginTop(6))
-        editor.addView(text("STREAMING URL", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        editor.addView(streamUrlLabel, marginTop(12))
         editor.addView(streamUrl, marginTop(6))
         editor.addView(text("ARTWORK · LARGE IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
         editor.addView(largeImage, marginTop(6))
@@ -640,14 +657,17 @@ class MainActivity : Activity() {
         editor.addView(text("TRANSPORT", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
         editor.addView(text("Once the manual override is active, field changes are validated and sent automatically after a short pause. Picked Gallery artwork is hosted automatically; external URLs must be publicly reachable by Discord.", 11, COLOR_MUTED), marginTop(5))
         val applyStudio: (Boolean) -> Boolean = applyStudio@{ showConfirmation ->
-            val currentName = name.text.toString().trim()
-            val currentDetails = details.text.toString().trim()
+            val selectedType = app.geckopresence.host.core.PresenceActivityType.entries
+                .getOrElse(activityType.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING }
+            val isCustomStatus = selectedType == app.geckopresence.host.core.PresenceActivityType.CUSTOM_STATUS
+            val currentName = if (isCustomStatus) "Custom Status" else name.text.toString().trim()
+            val currentDetails = if (isCustomStatus) "" else details.text.toString().trim()
             val currentState = state.text.toString().trim().takeIf(String::isNotEmpty)
             if (currentName.isEmpty()) {
                 if (showConfirmation) Toast.makeText(this, "Activity name is required", Toast.LENGTH_SHORT).show()
                 return@applyStudio false
             }
-            val startRaw = startsAt.text.toString().trim()
+            val startRaw = if (isCustomStatus) "" else startsAt.text.toString().trim()
             val startValue = startRaw.takeIf(String::isNotEmpty)?.toLongOrNull()
             if (startRaw.isNotEmpty() && startValue == null) {
                 if (showConfirmation) Toast.makeText(this, "Start timestamp must be Unix seconds", Toast.LENGTH_LONG).show()
@@ -660,7 +680,7 @@ class MainActivity : Activity() {
             } else {
                 System.currentTimeMillis() / 1_000L
             }
-            val endRaw = endsAt.text.toString().trim()
+            val endRaw = if (isCustomStatus) "" else endsAt.text.toString().trim()
             val endValue = endRaw.takeIf(String::isNotEmpty)?.toLongOrNull()
             if (endRaw.isNotEmpty() && endValue == null) {
                 if (showConfirmation) Toast.makeText(this, "End timestamp must be Unix seconds", Toast.LENGTH_LONG).show()
@@ -673,7 +693,9 @@ class MainActivity : Activity() {
                     tooltip.text.toString().trim().takeIf(String::isNotEmpty),
                 )
             }
-            val buttons = buildList {
+            val buttons = if (isCustomStatus) {
+                emptyList<app.geckopresence.host.core.PresenceButton>()
+            } else buildList {
                 val label1 = button1Label.text.toString().trim()
                 val url1 = button1Url.text.toString().trim()
                 if (label1.isNotEmpty() || url1.isNotEmpty()) add(app.geckopresence.host.core.PresenceButton(label1, url1))
@@ -681,19 +703,18 @@ class MainActivity : Activity() {
                 val url2 = button2Url.text.toString().trim()
                 if (label2.isNotEmpty() || url2.isNotEmpty()) add(app.geckopresence.host.core.PresenceButton(label2, url2))
             }
-            val types = app.geckopresence.host.core.PresenceActivityType.entries
-            val selectedType = types.getOrElse(activityType.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING }
             val candidate = app.geckopresence.host.core.PresenceActivity(
                 name = currentName,
                 type = selectedType,
                 details = currentDetails,
                 state = currentState,
-                startedAtEpochSeconds = resolvedStart,
+                startedAtEpochSeconds = resolvedStart.takeUnless { isCustomStatus },
                 endsAtEpochSeconds = endValue,
-                largeImage = assetFrom(largeImage, largeTooltip),
-                smallImage = assetFrom(smallImage, smallTooltip),
+                largeImage = if (isCustomStatus) null else assetFrom(largeImage, largeTooltip),
+                smallImage = if (isCustomStatus) null else assetFrom(smallImage, smallTooltip),
                 buttons = buttons,
-                streamUrl = streamUrl.text.toString().trim().takeIf(String::isNotEmpty),
+                streamUrl = if (selectedType == app.geckopresence.host.core.PresenceActivityType.STREAMING)
+                    streamUrl.text.toString().trim().takeIf(String::isNotEmpty) else null,
             )
             val validationErrors = candidate.validate()
             if (validationErrors.isNotEmpty()) {
@@ -710,7 +731,11 @@ class MainActivity : Activity() {
                 .putInt(PresenceEngineService.KEY_MANUAL_ACTIVITY_TYPE, selectedType.wireValue)
                 .putLong(PresenceEngineService.KEY_MANUAL_START, resolvedStart)
                 .putString(PresenceEngineService.KEY_MANUAL_END, endValue?.toString().orEmpty())
-                .putString(PresenceEngineService.KEY_MANUAL_STREAM_URL, streamUrl.text.toString().trim())
+                .putString(
+                    PresenceEngineService.KEY_MANUAL_STREAM_URL,
+                    if (selectedType == app.geckopresence.host.core.PresenceActivityType.STREAMING)
+                        streamUrl.text.toString().trim() else "",
+                )
                 .putString(PresenceEngineService.KEY_MANUAL_LARGE_IMAGE, largeImage.text.toString().trim())
                 .putString(PresenceEngineService.KEY_MANUAL_LARGE_TOOLTIP, largeTooltip.text.toString().trim())
                 .putString(PresenceEngineService.KEY_MANUAL_SMALL_IMAGE, smallImage.text.toString().trim())
@@ -905,7 +930,11 @@ class MainActivity : Activity() {
                     details = detailsField.text.toString().trim(),
                     state = stateField.text.toString().trim().takeIf(String::isNotEmpty),
                     activityType = app.geckopresence.host.core.PresenceActivityType.entries.getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING },
-                    streamUrl = streamField.text.toString().trim().takeIf(String::isNotEmpty),
+                    streamUrl = streamField.text.toString().trim().takeIf {
+                        app.geckopresence.host.core.PresenceActivityType.entries
+                            .getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING } ==
+                            app.geckopresence.host.core.PresenceActivityType.STREAMING && it.isNotEmpty()
+                    },
                     largeImage = asset(largeField, largeTooltip),
                     smallImage = asset(smallField, smallTooltip),
                     buttons = buildList {

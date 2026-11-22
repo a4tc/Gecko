@@ -85,6 +85,13 @@ object DiscordGatewayProtocol {
     private val ALLOWED_STATUSES = setOf("online", "idle", "dnd", "invisible", "offline")
 
     private fun PresenceActivity.toGatewayActivity(applicationId: Long): Map<String, Any?> = buildMap {
+        if (type == PresenceActivityType.CUSTOM_STATUS) {
+            put("name", "Custom Status")
+            put("type", type.wireValue)
+            put("state", state!!)
+            return@buildMap
+        }
+
         put("name", name)
         put("type", type.wireValue)
         put("status_display_type", 0)

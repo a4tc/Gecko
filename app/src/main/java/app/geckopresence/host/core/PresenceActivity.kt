@@ -127,7 +127,7 @@ object PresenceActivityDisplayFormatter {
             )
             PresenceActivityType.LISTENING -> Preview("Listening to $cleanName", cleanDetails, cleanState)
             PresenceActivityType.WATCHING -> Preview("Watching $cleanName", cleanDetails, cleanState)
-            PresenceActivityType.CUSTOM_STATUS -> Preview(cleanState ?: "Custom Status", cleanDetails, null)
+            PresenceActivityType.CUSTOM_STATUS -> Preview(cleanState ?: "Custom Status", null, null)
             PresenceActivityType.COMPETING -> Preview("Competing in $cleanName", cleanDetails, cleanState)
         }
     }

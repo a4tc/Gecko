@@ -68,6 +68,25 @@ object DiscordGatewayProtocolSelfTest {
         check(assets["large_image"] == "https://cdn.example/large.webp")
 
         // Preserve Discord's mp: attachment reference in the outgoing Gateway payload.
+        val customStatusUpdate = DiscordGatewayProtocol.presenceUpdate(
+            PresenceActivity(
+                name = "This name must not be sent",
+                type = PresenceActivityType.CUSTOM_STATUS,
+                details = "This detail must not be sent",
+                state = "Taking a break",
+                startedAtEpochSeconds = 1_700_000_000,
+                largeImage = PresenceAsset("https://cdn.example/ignored.webp"),
+            ),
+            1569772369344602173L,
+        )
+        val customStatusData = customStatusUpdate.data as Map<*, *>
+        val customStatusWire = (customStatusData["activities"] as List<*>).single() as Map<*, *>
+        check(customStatusWire == mapOf(
+            "name" to "Custom Status",
+            "type" to 4,
+            "state" to "Taking a break",
+        ))
+
         val mpReference =
             "mp:attachments/1/2/cover.webp?ex=1&is=2&hm=abc"
         val mpActivity = PresenceActivity(
