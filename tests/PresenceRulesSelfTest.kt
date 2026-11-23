@@ -93,7 +93,7 @@ fun main() {
     check(PresenceRules.extractPublicWebHost("https://printer.local/status") == null)
     check(PresenceRules.extractPublicWebHost("https://mail.example.org") == null)
     check(PresenceRules.extractPublicWebHost("https://example.org:443/path") == "example.org")
-    check(PresenceRules.cleanText("  Video\n  title  ", 80) == "Video   title")
+    check(PresenceRules.cleanText("  Video\n  title  ", 80) == "Video title")
     check(PresenceRules.cleanText("\u0000\u0001", 80) == null)
     check(PresenceRules.cleanText("A".repeat(140), 120)?.length == 120)
     check(PresenceRules.normalizeMediaState("PLAYING") == "playing")
