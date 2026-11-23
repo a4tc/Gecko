@@ -1541,7 +1541,7 @@ class MainActivity : Activity() {
             if (bytes == null || format == null) {
                 runOnUiThread {
                     finishArtworkImport(ArtworkGalleryStore.ImportResult.Rejected(
-                        "Could not read the image. Supported formats are JPEG, PNG, WebP and GIF, up to 8 MiB.",
+                        "Could not read the image. Supported formats are JPEG, PNG, WebP and GIF, up to 50 MiB.",
                     ))
                 }
                 return@Thread
@@ -1654,14 +1654,14 @@ class MainActivity : Activity() {
                         scaled.compress(Bitmap.CompressFormat.PNG, 100, output)
                         output.toByteArray()
                     }
-                    val finalBytes = if (encoded.size <= ArtworkGalleryStore.MAX_FILE_BYTES) encoded else {
+                    val finalBytes = if (encoded.size <= app.geckopresence.host.core.ArtworkMediaPolicy.MAX_STATIC_BYTES) encoded else {
                         ByteArrayOutputStream().use { output ->
                             scaled.compress(Bitmap.CompressFormat.WEBP, 92, output)
                             output.toByteArray()
                         }
                     }
                     if (!scaled.isRecycled) scaled.recycle()
-                    val result = if (finalBytes.size > ArtworkGalleryStore.MAX_FILE_BYTES ||
+                    val result = if (finalBytes.size > app.geckopresence.host.core.ArtworkMediaPolicy.MAX_STATIC_BYTES ||
                         app.geckopresence.host.core.ArtworkMediaPolicy.detectImage(finalBytes) == null
                     ) ArtworkGalleryStore.ImportResult.Rejected("Cropped image is still larger than 8 MiB. Zoom out or use a simpler image.")
                     else ArtworkGalleryStore.importEditedBytes(this, finalBytes, displayName)

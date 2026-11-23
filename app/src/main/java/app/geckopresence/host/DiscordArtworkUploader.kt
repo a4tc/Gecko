@@ -56,8 +56,8 @@ object DiscordArtworkUploader {
     fun uploadToWebhook(webhookUrl: String, bytes: ByteArray, sha256: String): Result<Hosted> {
         val webhook = DiscordArtworkPolicy.normalizeWebhookUrl(webhookUrl)
             ?: return Result.Failure("Webhook URL is invalid. Use a Discord webhook URL from your own server.")
-        if (bytes.isEmpty() || bytes.size > ArtworkMediaPolicy.MAX_FILE_BYTES) {
-            return Result.Failure("Artwork is empty or exceeds the 8 MiB limit.")
+        if (bytes.isEmpty() || bytes.size > ArtworkMediaPolicy.MAX_DISCORD_UPLOAD_BYTES) {
+            return Result.Failure("Artwork is empty or exceeds the 25 MB delivery limit.")
         }
         val format = ArtworkMediaPolicy.detectImage(bytes)
             ?: return Result.Failure("Only JPEG, PNG, WebP and GIF images can be uploaded.")

@@ -133,8 +133,8 @@ object ArtworkAutoPublisher {
 
     /** Returns (mp reference, null) or (null, human-readable reason). Serialized so one image uploads once. */
     private fun publishBytes(context: Context, bytes: ByteArray): Pair<String?, String?> = synchronized(publishLock) {
-        if (bytes.isEmpty() || bytes.size > ArtworkMediaPolicy.MAX_FILE_BYTES) {
-            return null to "Artwork exceeds the 8 MiB upload limit"
+        if (bytes.isEmpty() || bytes.size > ArtworkMediaPolicy.MAX_DISCORD_UPLOAD_BYTES) {
+            return null to "Artwork exceeds the 25 MB delivery limit"
         }
         val webhook = loadWebhook(context)
             ?: return null to "Save a Discord webhook in Settings before artwork can be published"
