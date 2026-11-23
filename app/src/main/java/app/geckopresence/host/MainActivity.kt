@@ -3,6 +3,8 @@ package app.geckopresence.host
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -12,6 +14,9 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.graphics.drawable.Animatable
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -42,6 +47,8 @@ import android.widget.Switch
 import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
+import java.io.ByteArrayOutputStream
+import java.util.Calendar
 import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.AppPresenceProfile
@@ -561,6 +568,37 @@ class MainActivity : Activity() {
         val endsAt = textField("End timestamp · Unix seconds (optional)", "studio_draft_end_timestamp", "", 16).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
         }
+        startsAt.visibility = View.GONE
+        endsAt.visibility = View.GONE
+        val timestampsSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val startTimestampValue = text("START · Not set (defaults to now)", 12, COLOR_TEXT)
+        val endTimestampValue = text("END · Not set", 12, COLOR_TEXT)
+        timestampsSection.addView(text("ACTIVITY TIMESTAMPS", 10, COLOR_MUTED, true, mono = true))
+        timestampsSection.addView(startTimestampValue, marginTop(7))
+        val startActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        startActions.addView(actionButton("PICK START", false) {
+            showPresenceTimestampPicker("Choose start date and time", startsAt.text.toString().toLongOrNull()) {
+                startsAt.setText(it.toString())
+            }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(4) })
+        startActions.addView(actionButton("SET NOW", false) {
+            startsAt.setText((System.currentTimeMillis() / 1_000L).toString())
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4) })
+        startActions.addView(actionButton("CLEAR", false) { startsAt.setText("") },
+            LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4) })
+        timestampsSection.addView(startActions, marginTop(6))
+        timestampsSection.addView(endTimestampValue, marginTop(12))
+        val endActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        endActions.addView(actionButton("PICK END", false) {
+            showPresenceTimestampPicker("Choose end date and time", endsAt.text.toString().toLongOrNull()) {
+                endsAt.setText(it.toString())
+            }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(4) })
+        endActions.addView(actionButton("CLEAR END", false) { endsAt.setText("") },
+            LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4) })
+        timestampsSection.addView(endActions, marginTop(6))
+        val artworkSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val buttonsSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         updatePreview = {
             val activityLabel = name.text.toString().trim()
             val activityDetails = details.text.toString().trim()
@@ -579,6 +617,10 @@ class MainActivity : Activity() {
             streamUrlLabel.visibility = if (isStreaming) View.VISIBLE else View.GONE
             streamUrl.visibility = if (isStreaming) View.VISIBLE else View.GONE
             previewArtworkStack.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            artworkSection.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            buttonsSection.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            previewButtons.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
+            timestampsSection.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
 
             val preview = app.geckopresence.host.core.PresenceActivityDisplayFormatter.format(
                 type = selectedType,
@@ -591,8 +633,17 @@ class MainActivity : Activity() {
             previewDetails.visibility = if (isCustomStatus || preview.details == null) View.GONE else View.VISIBLE
             previewState.text = preview.state.orEmpty()
             previewState.visibility = if (preview.state == null) View.GONE else View.VISIBLE
-            previewTimestamp.text = startsAt.text.toString().trim().takeIf(String::isNotEmpty)
-                ?.let { "STARTS · $it" } ?: "STARTS NOW"
+            val startSeconds = startsAt.text.toString().trim().toLongOrNull()
+                ?: if (settings.getBoolean(PresenceEngineService.KEY_MANUAL_ACTIVE, false)) {
+                    settings.getLong(PresenceEngineService.KEY_MANUAL_START, 0L).takeIf { it > 0L }
+                } else null
+            val endSeconds = endsAt.text.toString().trim().toLongOrNull()
+            startTimestampValue.text = "START · ${formatPresenceTimestamp(startSeconds) ?: "Not set (defaults to now)"}"
+            endTimestampValue.text = "END · ${formatPresenceTimestamp(endSeconds) ?: "Not set"}"
+            previewTimestamp.text = if (startSeconds != null) {
+                "STARTS · ${formatPresenceTimestamp(startSeconds)}"
+            } else "STARTS NOW"
+            previewTimestamp.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
             previewButtonOne.text = button1Label.text.toString().trim()
             previewButtonTwo.text = button2Label.text.toString().trim()
             previewButtonOne.visibility = if (previewButtonOne.text.isNullOrBlank()) View.GONE else View.VISIBLE
@@ -634,24 +685,24 @@ class MainActivity : Activity() {
         editor.addView(accountStatus, marginTop(6))
         editor.addView(streamUrlLabel, marginTop(12))
         editor.addView(streamUrl, marginTop(6))
-        editor.addView(text("ARTWORK · LARGE IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
-        editor.addView(largeImage, marginTop(6))
-        editor.addView(actionButton("PICK LARGE ARTWORK FROM GALLERY", false) { launchArtworkPicker(KEY_STUDIO_DRAFT_LARGE_IMAGE) }, marginTop(5))
-        editor.addView(largeTooltip, marginTop(6))
-        editor.addView(text("This is the text Discord shows when someone hovers over the large artwork. It is not a help tooltip for this editor.", 10, COLOR_MUTED), marginTop(4))
-        editor.addView(text("ARTWORK · SMALL IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
-        editor.addView(smallImage, marginTop(6))
-        editor.addView(actionButton("PICK SMALL ARTWORK FROM GALLERY", false) { launchArtworkPicker(KEY_STUDIO_DRAFT_SMALL_IMAGE) }, marginTop(5))
-        editor.addView(smallTooltip, marginTop(6))
-        editor.addView(text("This text is displayed by Discord when someone hovers over the small artwork.", 10, COLOR_MUTED), marginTop(4))
-        editor.addView(text("RICH PRESENCE BUTTONS · MAX 2", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
-        editor.addView(button1Label, marginTop(6))
-        editor.addView(button1Url, marginTop(6))
-        editor.addView(button2Label, marginTop(6))
-        editor.addView(button2Url, marginTop(6))
-        editor.addView(text("TIMESTAMPS · UNIX SECONDS", 10, COLOR_MUTED, true, mono = true), marginTop(16))
-        editor.addView(startsAt, marginTop(6))
-        editor.addView(endsAt, marginTop(6))
+        artworkSection.addView(text("ARTWORK · LARGE IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
+        artworkSection.addView(largeImage, marginTop(6))
+        artworkSection.addView(actionButton("PICK LARGE ARTWORK FROM GALLERY", false) { launchArtworkPicker(KEY_STUDIO_DRAFT_LARGE_IMAGE) }, marginTop(5))
+        artworkSection.addView(largeTooltip, marginTop(6))
+        artworkSection.addView(text("This is the text Discord shows when someone hovers over the large artwork. It is not a help tooltip for this editor.", 10, COLOR_MUTED), marginTop(4))
+        artworkSection.addView(text("ARTWORK · SMALL IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
+        artworkSection.addView(smallImage, marginTop(6))
+        artworkSection.addView(actionButton("PICK SMALL ARTWORK FROM GALLERY", false) { launchArtworkPicker(KEY_STUDIO_DRAFT_SMALL_IMAGE) }, marginTop(5))
+        artworkSection.addView(smallTooltip, marginTop(6))
+        artworkSection.addView(text("This text is displayed by Discord when someone hovers over the small artwork.", 10, COLOR_MUTED), marginTop(4))
+        editor.addView(artworkSection)
+        buttonsSection.addView(text("RICH PRESENCE BUTTONS · MAX 2", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
+        buttonsSection.addView(button1Label, marginTop(6))
+        buttonsSection.addView(button1Url, marginTop(6))
+        buttonsSection.addView(button2Label, marginTop(6))
+        buttonsSection.addView(button2Url, marginTop(6))
+        editor.addView(buttonsSection)
+        editor.addView(timestampsSection, marginTop(16))
         editor.addView(text("DISCORD ACTIVITY DISPLAY", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
         editor.addView(text("Discord formats the headline by activity type: Playing/Listening/Watching/Competing use Activity name; Streaming uses Details; Custom Status uses State. The other fields remain separate activity metadata. The Application ID associates this activity with your registered Discord application and its assets.", 11, COLOR_MUTED), marginTop(5))
         editor.addView(text("TRANSPORT", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
@@ -845,10 +896,12 @@ class MainActivity : Activity() {
         val stateField = field("state", "State (optional)", stored?.state.orEmpty(), 120)
         val typeKey = appProfileDraftKey(selectedPackage, "type")
         if (!settings.contains(typeKey)) settings.edit().putInt(typeKey, stored?.activityType?.wireValue ?: 0).apply()
+        var updateProfileTypeVisibility: () -> Unit = {}
         val typeSpinner = optionSpinner(
             "Activity type", typeKey,
             listOf("Playing", "Streaming", "Listening", "Watching", "Custom Status", "Competing"),
             stored?.activityType?.wireValue ?: 0,
+            onSelectionChanged = { updateProfileTypeVisibility() },
         )
         val streamField = field("streamUrl", "Twitch / YouTube URL (Streaming only)", stored?.streamUrl.orEmpty(), 512, uriInput)
         val largeField = field("largeImage", "Large image URL / asset key", stored?.largeImage?.image.orEmpty(), 300, uriInput)
@@ -861,6 +914,37 @@ class MainActivity : Activity() {
         val button2Url = field("button2Url", "Button 2 HTTPS URL", stored?.buttons?.getOrNull(1)?.url.orEmpty(), 512, uriInput)
         val startField = field("startedAt", "Start timestamp · Unix seconds (optional)", stored?.startedAtEpochSeconds?.toString().orEmpty(), 16, numberInput)
         val endField = field("endsAt", "End timestamp · Unix seconds (optional)", stored?.endsAtEpochSeconds?.toString().orEmpty(), 16, numberInput)
+        startField.visibility = View.GONE
+        endField.visibility = View.GONE
+        val profileTimestamps = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val profileStartValue = text("START · ${formatPresenceTimestamp(startField.text.toString()) ?: "Not set (use app detection time)"}", 12, COLOR_TEXT)
+        val profileEndValue = text("END · ${formatPresenceTimestamp(endField.text.toString()) ?: "Not set"}", 12, COLOR_TEXT)
+        profileTimestamps.addView(profileStartValue)
+        val profileStartActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        profileStartActions.addView(actionButton("PICK START", false) {
+            showPresenceTimestampPicker("Choose app profile start", startField.text.toString().toLongOrNull()) {
+                startField.setText(it.toString())
+                profileStartValue.text = "START · ${formatPresenceTimestamp(it)}"
+            }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(4) })
+        profileStartActions.addView(actionButton("CLEAR", false) {
+            startField.setText("")
+            profileStartValue.text = "START · Not set (use app detection time)"
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4) })
+        profileTimestamps.addView(profileStartActions, marginTop(6))
+        profileTimestamps.addView(profileEndValue, marginTop(12))
+        val profileEndActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        profileEndActions.addView(actionButton("PICK END", false) {
+            showPresenceTimestampPicker("Choose app profile end", endField.text.toString().toLongOrNull()) {
+                endField.setText(it.toString())
+                profileEndValue.text = "END · ${formatPresenceTimestamp(it)}"
+            }
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(4) })
+        profileEndActions.addView(actionButton("CLEAR END", false) {
+            endField.setText("")
+            profileEndValue.text = "END · Not set"
+        }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(4) })
+        profileTimestamps.addView(profileEndActions, marginTop(6))
         val priorityField = field("priority", "Priority override · 0–1000 (blank = source default)", stored?.priorityOverride?.toString().orEmpty(), 4, numberInput)
         val statusKey = appProfileDraftKey(selectedPackage, "accountStatus")
         val statusIndex = when (stored?.accountStatus) {
@@ -879,33 +963,57 @@ class MainActivity : Activity() {
             isChecked = stored?.enabled ?: true
         }
 
-        profileCard.addView(text("ACTIVITY NAME", 10, COLOR_MUTED, true, mono = true), marginTop(14))
-        profileCard.addView(labelField, marginTop(6))
-        profileCard.addView(text("DETAILS", 10, COLOR_MUTED, true, mono = true), marginTop(12))
-        profileCard.addView(detailsField, marginTop(6))
-        profileCard.addView(text("STATE · OPTIONAL", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        val profileNameDetails = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        profileNameDetails.addView(text("ACTIVITY NAME", 10, COLOR_MUTED, true, mono = true), marginTop(14))
+        profileNameDetails.addView(labelField, marginTop(6))
+        profileNameDetails.addView(text("DETAILS", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        profileNameDetails.addView(detailsField, marginTop(6))
+        profileCard.addView(profileNameDetails)
+        val profileStateLabel = text("STATE · OPTIONAL", 10, COLOR_MUTED, true, mono = true)
+        profileCard.addView(profileStateLabel, marginTop(12))
         profileCard.addView(stateField, marginTop(6))
         profileCard.addView(text("ACTIVITY TYPE", 10, COLOR_MUTED, true, mono = true), marginTop(12))
         profileCard.addView(typeSpinner, marginTop(6))
-        profileCard.addView(text("STREAMING URL", 10, COLOR_MUTED, true, mono = true), marginTop(12))
-        profileCard.addView(streamField, marginTop(6))
-        profileCard.addView(text("LARGE ARTWORK", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
-        profileCard.addView(largeField, marginTop(6))
-        profileCard.addView(actionButton("PICK / UPLOAD LARGE ARTWORK", false) { launchArtworkPicker(appProfileDraftKey(selectedPackage, "largeImage")) }, marginTop(5))
-        profileCard.addView(largeTooltip, marginTop(6))
-        profileCard.addView(text("SMALL ARTWORK", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
-        profileCard.addView(smallField, marginTop(6))
-        profileCard.addView(actionButton("PICK / UPLOAD SMALL ARTWORK", false) { launchArtworkPicker(appProfileDraftKey(selectedPackage, "smallImage")) }, marginTop(5))
-        profileCard.addView(smallTooltip, marginTop(6))
-        profileCard.addView(text("BUTTONS · MAXIMUM TWO", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
-        profileCard.addView(button1Label, marginTop(6))
-        profileCard.addView(button1Url, marginTop(6))
-        profileCard.addView(button2Label, marginTop(6))
-        profileCard.addView(button2Url, marginTop(6))
+        val profileStreamSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        profileStreamSection.addView(text("STREAMING URL", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        profileStreamSection.addView(streamField, marginTop(6))
+        profileCard.addView(profileStreamSection)
+        val profileArtworkSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        profileArtworkSection.addView(text("LARGE ARTWORK", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
+        profileArtworkSection.addView(largeField, marginTop(6))
+        profileArtworkSection.addView(actionButton("PICK / UPLOAD LARGE ARTWORK", false) { launchArtworkPicker(appProfileDraftKey(selectedPackage, "largeImage")) }, marginTop(5))
+        profileArtworkSection.addView(largeTooltip, marginTop(6))
+        profileArtworkSection.addView(text("SMALL ARTWORK", 10, COLOR_ACCENT, true, mono = true), marginTop(12))
+        profileArtworkSection.addView(smallField, marginTop(6))
+        profileArtworkSection.addView(actionButton("PICK / UPLOAD SMALL ARTWORK", false) { launchArtworkPicker(appProfileDraftKey(selectedPackage, "smallImage")) }, marginTop(5))
+        profileArtworkSection.addView(smallTooltip, marginTop(6))
+        profileCard.addView(profileArtworkSection)
+        val profileButtonsSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        profileButtonsSection.addView(text("BUTTONS · MAXIMUM TWO", 10, COLOR_ACCENT, true, mono = true), marginTop(14))
+        profileButtonsSection.addView(button1Label, marginTop(6))
+        profileButtonsSection.addView(button1Url, marginTop(6))
+        profileButtonsSection.addView(button2Label, marginTop(6))
+        profileButtonsSection.addView(button2Url, marginTop(6))
+        profileCard.addView(profileButtonsSection)
         profileCard.addView(text("TIMESTAMPS & PRIORITY", 10, COLOR_MUTED, true, mono = true), marginTop(14))
-        profileCard.addView(startField, marginTop(6))
-        profileCard.addView(endField, marginTop(6))
+        profileCard.addView(profileTimestamps, marginTop(6))
         profileCard.addView(priorityField, marginTop(6))
+        updateProfileTypeVisibility = {
+            val customStatus = app.geckopresence.host.core.PresenceActivityType.entries
+                .getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING } ==
+                app.geckopresence.host.core.PresenceActivityType.CUSTOM_STATUS
+            val streaming = app.geckopresence.host.core.PresenceActivityType.entries
+                .getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING } ==
+                app.geckopresence.host.core.PresenceActivityType.STREAMING
+            profileNameDetails.visibility = if (customStatus) View.GONE else View.VISIBLE
+            profileStateLabel.text = if (customStatus) "CUSTOM STATUS TEXT" else "STATE · OPTIONAL"
+            stateField.hint = if (customStatus) "Your Discord status text" else "State (optional)"
+            profileStreamSection.visibility = if (streaming) View.VISIBLE else View.GONE
+            profileArtworkSection.visibility = if (customStatus) View.GONE else View.VISIBLE
+            profileButtonsSection.visibility = if (customStatus) View.GONE else View.VISIBLE
+            profileTimestamps.visibility = if (customStatus) View.GONE else View.VISIBLE
+        }
+        updateProfileTypeVisibility()
         profileCard.addView(text("ACCOUNT STATUS OVERRIDE", 10, COLOR_MUTED, true, mono = true), marginTop(12))
         profileCard.addView(statusSpinner, marginTop(6))
         profileCard.addView(enabledSwitch, marginTop(10))
@@ -921,6 +1029,9 @@ class MainActivity : Activity() {
                 val reference = image.text.toString().trim().takeIf(String::isNotEmpty) ?: return null
                 return app.geckopresence.host.core.PresenceAsset(reference, tooltip.text.toString().trim().takeIf(String::isNotEmpty))
             }
+            val selectedProfileType = app.geckopresence.host.core.PresenceActivityType.entries
+                .getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING }
+            val customStatus = selectedProfileType == app.geckopresence.host.core.PresenceActivityType.CUSTOM_STATUS
             val candidate = try {
                 val priorityRaw = priorityField.text.toString().trim()
                 val priority = if (priorityRaw.isEmpty()) null else priorityRaw.toIntOrNull()
@@ -929,22 +1040,18 @@ class MainActivity : Activity() {
                     activityLabel = labelField.text.toString().trim(),
                     details = detailsField.text.toString().trim(),
                     state = stateField.text.toString().trim().takeIf(String::isNotEmpty),
-                    activityType = app.geckopresence.host.core.PresenceActivityType.entries.getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING },
-                    streamUrl = streamField.text.toString().trim().takeIf {
-                        app.geckopresence.host.core.PresenceActivityType.entries
-                            .getOrElse(typeSpinner.selectedItemPosition) { app.geckopresence.host.core.PresenceActivityType.PLAYING } ==
-                            app.geckopresence.host.core.PresenceActivityType.STREAMING && it.isNotEmpty()
-                    },
-                    largeImage = asset(largeField, largeTooltip),
-                    smallImage = asset(smallField, smallTooltip),
-                    buttons = buildList {
+                    activityType = selectedProfileType,
+                    streamUrl = streamField.text.toString().trim().takeIf { selectedProfileType == app.geckopresence.host.core.PresenceActivityType.STREAMING && it.isNotEmpty() },
+                    largeImage = if (customStatus) null else asset(largeField, largeTooltip),
+                    smallImage = if (customStatus) null else asset(smallField, smallTooltip),
+                    buttons = if (customStatus) emptyList() else buildList {
                         val l1 = button1Label.text.toString().trim(); val u1 = button1Url.text.toString().trim()
                         if (l1.isNotEmpty() || u1.isNotEmpty()) add(app.geckopresence.host.core.PresenceButton(l1, u1))
                         val l2 = button2Label.text.toString().trim(); val u2 = button2Url.text.toString().trim()
                         if (l2.isNotEmpty() || u2.isNotEmpty()) add(app.geckopresence.host.core.PresenceButton(l2, u2))
                     },
-                    startedAtEpochSeconds = optionalLong(startField, "Start timestamp"),
-                    endsAtEpochSeconds = optionalLong(endField, "End timestamp"),
+                    startedAtEpochSeconds = if (customStatus) null else optionalLong(startField, "Start timestamp"),
+                    endsAtEpochSeconds = if (customStatus) null else optionalLong(endField, "End timestamp"),
                     priorityOverride = priority,
                     accountStatus = when (statusSpinner.selectedItemPosition) {
                         1 -> "online"; 2 -> "idle"; 3 -> "dnd"; 4 -> "invisible"; 5 -> "offline"; else -> null
@@ -981,6 +1088,41 @@ class MainActivity : Activity() {
         profileCard.addView(text(if (stored == null) "No custom profile saved · automatic defaults are active." else "Profile saved · ${if (stored.enabled) "enabled" else "disabled"} · type ${stored.activityType?.displayLabel ?: "Playing"} · status ${stored.accountStatus ?: "global"}.", 10, COLOR_MUTED), marginTop(10))
         pageContent.addView(profileCard, marginTop(12))
     }
+
+    private fun showPresenceTimestampPicker(
+        title: String,
+        initialEpochSeconds: Long?,
+        onSelected: (Long) -> Unit,
+    ) {
+        val initial = Calendar.getInstance().apply {
+            if (initialEpochSeconds != null && initialEpochSeconds > 0L &&
+                initialEpochSeconds <= Long.MAX_VALUE / 1_000L
+            ) timeInMillis = initialEpochSeconds * 1_000L
+        }
+        DatePickerDialog(
+            this,
+            { _, year, month, day ->
+                TimePickerDialog(
+                    this,
+                    { _, hour, minute ->
+                        onSelected(PresenceTimestampPolicy.fromLocalFields(year, month, day, hour, minute))
+                    },
+                    initial.get(Calendar.HOUR_OF_DAY),
+                    initial.get(Calendar.MINUTE),
+                    android.text.format.DateFormat.is24HourFormat(this),
+                ).show()
+            },
+            initial.get(Calendar.YEAR),
+            initial.get(Calendar.MONTH),
+            initial.get(Calendar.DAY_OF_MONTH),
+        ).apply { setTitle(title) }.show()
+    }
+
+    private fun formatPresenceTimestamp(epochSeconds: Long?): String? =
+        PresenceTimestampPolicy.format(epochSeconds)
+
+    private fun formatPresenceTimestamp(raw: String): String? =
+        PresenceTimestampPolicy.parse(raw)?.let { PresenceTimestampPolicy.format(it) }
 
     private fun appProfileDraftKey(packageName: String, field: String): String =
         "studio_app_profile_${packageName}_$field"
@@ -1391,22 +1533,155 @@ class MainActivity : Activity() {
     private fun importArtworkSelection(uri: Uri) {
         if (artworkImportInProgress) return
         artworkImportInProgress = true
-        Toast.makeText(this, "Importing artwork into private storage…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Preparing artwork editor…", Toast.LENGTH_SHORT).show()
         Thread({
-            val result = ArtworkGalleryStore.importUri(this, uri)
-            runOnUiThread {
-                artworkImportInProgress = false
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                when (result) {
-                    is ArtworkGalleryStore.ImportResult.Rejected -> {
-                        clearPendingArtworkSelection()
-                        Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
+            val bytes = readArtworkBytes(uri)
+            val format = bytes?.let(app.geckopresence.host.core.ArtworkMediaPolicy::detectImage)
+            if (bytes == null || format == null) {
+                runOnUiThread {
+                    finishArtworkImport(ArtworkGalleryStore.ImportResult.Rejected(
+                        "Could not read the image. Supported formats are JPEG, PNG, WebP and GIF, up to 8 MiB.",
+                    ))
+                }
+                return@Thread
+            }
+            if (format.extension == "gif") {
+                val result = ArtworkGalleryStore.importEditedBytes(this, bytes, uri.lastPathSegment ?: "Animated GIF")
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        Toast.makeText(this, "Animated GIF kept original to preserve every frame and its timing.", Toast.LENGTH_LONG).show()
+                        finishArtworkImport(result)
                     }
-                    is ArtworkGalleryStore.ImportResult.Added -> linkImportedArtwork(result.artwork)
-                    is ArtworkGalleryStore.ImportResult.Duplicate -> linkImportedArtwork(result.artwork)
+                }
+                return@Thread
+            }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (!app.geckopresence.host.core.ArtworkMediaPolicy.hasValidDimensions(bounds.outWidth, bounds.outHeight)) {
+                runOnUiThread {
+                    finishArtworkImport(ArtworkGalleryStore.ImportResult.Rejected("Image dimensions are invalid or exceed 40 megapixels."))
+                }
+                return@Thread
+            }
+            var sampleSize = 1
+            while (bounds.outWidth / sampleSize > 2_048 || bounds.outHeight / sampleSize > 2_048) sampleSize *= 2
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            })
+            if (bitmap == null) {
+                runOnUiThread {
+                    finishArtworkImport(ArtworkGalleryStore.ImportResult.Rejected("The selected image could not be decoded."))
+                }
+                return@Thread
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) {
+                    bitmap.recycle()
+                    artworkImportInProgress = false
+                    clearPendingArtworkSelection()
+                } else {
+                    showArtworkCropDialog(bitmap, uri.lastPathSegment ?: "Edited artwork")
                 }
             }
         }, "gecko-artwork-import").start()
+    }
+
+    private fun readArtworkBytes(uri: Uri): ByteArray? = runCatching {
+        if (!uri.scheme.equals("content", ignoreCase = true)) return null
+        contentResolver.openInputStream(uri)?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(16 * 1024)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > ArtworkGalleryStore.MAX_FILE_BYTES) return null
+                output.write(buffer, 0, count)
+            }
+            output.toByteArray()
+        }
+    }.getOrNull()
+
+    private fun showArtworkCropDialog(source: Bitmap, displayName: String) {
+        val cropView = ArtworkCropView(this, source)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(4))
+        }
+        content.addView(cropView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)))
+        content.addView(text("Drag to position · pinch to zoom · crop is square", 11, COLOR_MUTED), marginTop(8))
+        val modes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        modes.addView(actionButton("FIT", false) { cropView.setMode(ArtworkCropView.Mode.FIT) },
+            LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(4) })
+        modes.addView(actionButton("FILL", false) { cropView.setMode(ArtworkCropView.Mode.FILL) },
+            LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4); marginEnd = dp(4) })
+        modes.addView(actionButton("ORIGINAL", false) { cropView.setMode(ArtworkCropView.Mode.ORIGINAL) },
+            LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
+        content.addView(modes, marginTop(8))
+        var accepted = false
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Artwork editor")
+            .setView(content)
+            .setNegativeButton("CANCEL", null)
+            .setPositiveButton("USE CROP", null)
+            .create()
+        dialog.setOnDismissListener {
+            if (!accepted) {
+                artworkImportInProgress = false
+                clearPendingArtworkSelection()
+            }
+            if (!source.isRecycled) source.recycle()
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val cropped = runCatching { cropView.cropBitmap() }.getOrNull()
+                if (cropped == null) {
+                    Toast.makeText(this, "Could not crop this image", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                accepted = true
+                dialog.dismiss()
+                Thread({
+                    val scaled = if (maxOf(cropped.width, cropped.height) > 1_024) {
+                        val ratio = 1_024f / maxOf(cropped.width, cropped.height)
+                        Bitmap.createScaledBitmap(cropped, (cropped.width * ratio).toInt().coerceAtLeast(1),
+                            (cropped.height * ratio).toInt().coerceAtLeast(1), true).also { if (it !== cropped) cropped.recycle() }
+                    } else cropped
+                    val encoded = ByteArrayOutputStream().use { output ->
+                        scaled.compress(Bitmap.CompressFormat.PNG, 100, output)
+                        output.toByteArray()
+                    }
+                    val finalBytes = if (encoded.size <= ArtworkGalleryStore.MAX_FILE_BYTES) encoded else {
+                        ByteArrayOutputStream().use { output ->
+                            scaled.compress(Bitmap.CompressFormat.WEBP, 92, output)
+                            output.toByteArray()
+                        }
+                    }
+                    if (!scaled.isRecycled) scaled.recycle()
+                    val result = if (finalBytes.size > ArtworkGalleryStore.MAX_FILE_BYTES ||
+                        app.geckopresence.host.core.ArtworkMediaPolicy.detectImage(finalBytes) == null
+                    ) ArtworkGalleryStore.ImportResult.Rejected("Cropped image is still larger than 8 MiB. Zoom out or use a simpler image.")
+                    else ArtworkGalleryStore.importEditedBytes(this, finalBytes, displayName)
+                    runOnUiThread { if (!isFinishing && !isDestroyed) finishArtworkImport(result) }
+                }, "gecko-artwork-crop-save").start()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun finishArtworkImport(result: ArtworkGalleryStore.ImportResult) {
+        artworkImportInProgress = false
+        if (isFinishing || isDestroyed) return
+        when (result) {
+            is ArtworkGalleryStore.ImportResult.Rejected -> {
+                clearPendingArtworkSelection()
+                Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
+            }
+            is ArtworkGalleryStore.ImportResult.Added -> linkImportedArtwork(result.artwork)
+            is ArtworkGalleryStore.ImportResult.Duplicate -> linkImportedArtwork(result.artwork)
+        }
     }
 
     /** Imported artwork is linked by stable reference; the engine hosts and refreshes it automatically. */
@@ -1467,6 +1742,20 @@ class MainActivity : Activity() {
         } ?: return
         val file = ArtworkGalleryStore.previewFile(this, artwork) ?: return
         artworkPreviewExecutor().execute {
+            if (file.extension.equals("gif", ignoreCase = true) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val drawable = runCatching {
+                    ImageDecoder.decodeDrawable(ImageDecoder.createSource(file)) { decoder, info, _ ->
+                        decoder.setTargetSampleSize((maxOf(info.size.width, info.size.height) / 480).coerceAtLeast(1))
+                    }
+                }.getOrNull()
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed && target.tag == key && drawable != null) {
+                        target.setImageDrawable(drawable)
+                        (drawable as? Animatable)?.start()
+                    }
+                }
+                return@execute
+            }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
             var sample = 1

@@ -21,6 +21,8 @@ object ArtworkMediaPolicy {
         ) -> ImageFormat("image/png", "png")
         bytes.size >= 12 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
             String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> ImageFormat("image/webp", "webp")
+        bytes.size >= 10 && (String(bytes, 0, 6, Charsets.US_ASCII) == "GIF87a" ||
+            String(bytes, 0, 6, Charsets.US_ASCII) == "GIF89a") -> ImageFormat("image/gif", "gif")
         else -> null
     }
 
@@ -34,13 +36,14 @@ object ArtworkMediaPolicy {
     fun isValidStoredFileName(id: String, fileName: String): Boolean {
         if (!id.matches(Regex("^[a-f0-9-]{36}$"))) return false
         val extension = fileName.substringAfterLast('.', "")
-        return extension in setOf("jpg", "png", "webp") && fileName == "$id.$extension"
+        return extension in setOf("jpg", "png", "webp", "gif") && fileName == "$id.$extension"
     }
 
     fun mimeMatchesExtension(mimeType: String, fileName: String): Boolean = when (mimeType) {
         "image/jpeg" -> fileName.endsWith(".jpg")
         "image/png" -> fileName.endsWith(".png")
         "image/webp" -> fileName.endsWith(".webp")
+        "image/gif" -> fileName.endsWith(".gif")
         else -> false
     }
 }

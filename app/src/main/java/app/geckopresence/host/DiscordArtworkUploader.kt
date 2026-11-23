@@ -60,7 +60,7 @@ object DiscordArtworkUploader {
             return Result.Failure("Artwork is empty or exceeds the 8 MiB limit.")
         }
         val format = ArtworkMediaPolicy.detectImage(bytes)
-            ?: return Result.Failure("Only JPEG, PNG and WebP images can be uploaded.")
+            ?: return Result.Failure("Only JPEG, PNG, WebP and GIF images can be uploaded.")
 
         // The filename carries no personal information: a prefix of the content hash only.
         val filename = "${sha256.take(16)}.${format.extension}"

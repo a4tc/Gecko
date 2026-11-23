@@ -60,6 +60,9 @@ object ArtworkGalleryStore {
         return importBytes(app, bytes, queryDisplayName(app, uri))
     }
 
+    fun importEditedBytes(context: Context, bytes: ByteArray, displayName: String): ImportResult =
+        importBytes(context.applicationContext, bytes, displayName)
+
     private fun importBytes(context: Context, bytes: ByteArray, requestedDisplayName: String): ImportResult {
         val app = context.applicationContext
         val directory = galleryDirectory(app).apply { mkdirs() }
@@ -75,11 +78,19 @@ object ArtworkGalleryStore {
         if (localFiles.size >= MAX_ITEMS) return ImportResult.Rejected("Gallery is full (maximum $MAX_ITEMS images).")
         if (bytes.isEmpty() || bytes.size > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 8 MiB limit.")
         val detected = ArtworkMediaPolicy.detectImage(bytes)
-            ?: return ImportResult.Rejected("Only JPEG, PNG, and WebP images are supported.")
-        val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, dimensions)
-        val width = dimensions.outWidth
-        val height = dimensions.outHeight
+            ?: return ImportResult.Rejected("Only JPEG, PNG, WebP and GIF images are supported.")
+        val width: Int
+        val height: Int
+        if (detected.extension == "gif") {
+            if (bytes.size < 10) return ImportResult.Rejected("The GIF header is incomplete.")
+            width = (bytes[6].toInt() and 0xFF) or ((bytes[7].toInt() and 0xFF) shl 8)
+            height = (bytes[8].toInt() and 0xFF) or ((bytes[9].toInt() and 0xFF) shl 8)
+        } else {
+            val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, dimensions)
+            width = dimensions.outWidth
+            height = dimensions.outHeight
+        }
         if (!ArtworkMediaPolicy.hasValidDimensions(width, height)) {
             return ImportResult.Rejected("Image dimensions are invalid or exceed 40 megapixels.")
         }
