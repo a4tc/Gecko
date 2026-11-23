@@ -11,6 +11,7 @@ import app.geckopresence.host.core.GatewayInvalidSessionPolicy
 import app.geckopresence.host.core.PresenceActivity
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.request.header
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.websocket.CloseReason
@@ -56,6 +57,7 @@ import kotlin.random.Random
 class DiscordGatewayPublisher(
     private val applicationId: Long,
     private val onSessionRejected: () -> Unit = {},
+    private val onDiagnostic: (String) -> Unit = {},
     private val onState: (state: String, message: String) -> Unit,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -112,11 +114,12 @@ class DiscordGatewayPublisher(
     }
 
     fun publish(activity: PresenceActivity?, status: String = "online") {
-        synchronized(stateLock) {
+        val revision = synchronized(stateLock) {
             pendingActivity = activity
             pendingStatus = status.takeIf { it in ALLOWED_PRESENCE_STATUSES } ?: "online"
-            pendingRevision += 1L
+            ++pendingRevision
         }
+        onDiagnostic(if (activity == null) "Presence clear queued revision=$revision" else "Presence queued revision=$revision")
         updateEvents.trySend(Unit)
     }
 
@@ -173,7 +176,12 @@ class DiscordGatewayPublisher(
             var helloTimeoutJob: Job? = null
             try {
                 val currentSocket = withTimeout(CONNECTION_TIMEOUT_MS) {
-                    client.webSocketSession(urlString = targetUrl)
+                    client.webSocketSession(urlString = targetUrl) {
+                        header("User-Agent", "Discord-Android/314013;RNA")
+                        header("Accept-Language", "en-US")
+                        header("Cache-Control", "no-cache")
+                        header("Pragma", "no-cache")
+                    }
                 }
                 currentSocket.maxFrameSize = MAX_GATEWAY_FRAME_BYTES
                 socket = currentSocket
@@ -194,17 +202,30 @@ class DiscordGatewayPublisher(
                 for (frame in currentSocket.incoming) {
                     if (frame !is Frame.Text) continue
                     val message = frame.readText()
-                    if (message.toByteArray(Charsets.UTF_8).size > MAX_GATEWAY_FRAME_BYTES) {
-                        requestReconnect(currentSocket, "Gateway frame exceeded the local safety limit")
-                        continue
-                    }
+                    val frameBytes = message.toByteArray(Charsets.UTF_8).size.toLong()
                     val packet = try {
                         JSONObject(message)
                     } catch (_: JSONException) {
+                        onDiagnostic("Gateway frame probe: invalid JSON bytes=$frameBytes")
                         requestReconnect(currentSocket, "Invalid Gateway JSON")
                         continue
                     }
                     val opcode = packet.intOrDefault("op", -1)
+                    val frameEvent = packet.stringOrDefault("t").ifBlank { "OP_$opcode" }
+
+                    if (opcode == DiscordGatewayProtocol.OP_HELLO ||
+                        (opcode == DiscordGatewayProtocol.OP_DISPATCH &&
+                            frameEvent in setOf("READY", "RESUMED"))
+                    ) {
+                        onDiagnostic("Gateway frame probe: event=$frameEvent opcode=$opcode bytes=$frameBytes")
+                    }
+
+                    if (frameBytes > MAX_ACCEPTED_GATEWAY_FRAME_BYTES) {
+                        onDiagnostic("Gateway frame cap hit: event=$frameEvent opcode=$opcode bytes=$frameBytes cap=$MAX_ACCEPTED_GATEWAY_FRAME_BYTES")
+                        requestReconnect(currentSocket, "Gateway frame exceeded the local safety limit")
+                        continue
+                    }
+
                     val data = packet.valueOrNull("d")
 
                     when (opcode) {
@@ -216,8 +237,6 @@ class DiscordGatewayPublisher(
                                 requestReconnect(currentSocket, "Invalid heartbeat interval")
                                 continue
                             }
-                            localHeartbeat = startHeartbeat(currentSocket, heartbeatInterval)
-                            heartbeatJob = localHeartbeat
                             emitState(STATE_IDENTIFYING, "Discord Gateway handshake started")
                             val envelope = if (resumable) {
                                 val id = synchronized(stateLock) { sessionId }
@@ -225,13 +244,16 @@ class DiscordGatewayPublisher(
                                 if (id != null && sequence != null) {
                                     DiscordGatewayProtocol.resume(token, id, sequence)
                                 } else {
-                                    DiscordGatewayProtocol.identify(token, androidOsLabel(), androidDeviceLabel())
+                                    DiscordGatewayProtocol.identify(token, "Android", Build.DEVICE)
                                 }
                             } else {
-                                DiscordGatewayProtocol.identify(token, androidOsLabel(), androidDeviceLabel())
+                                DiscordGatewayProtocol.identify(token, "Android", Build.DEVICE)
                             }
                             sendEnvelope(envelope, currentSocket)
                             handshakeSent = true
+                            // Do not let the heartbeat coroutine race ahead of IDENTIFY/RESUME.
+                            localHeartbeat = startHeartbeat(currentSocket, heartbeatInterval)
+                            heartbeatJob = localHeartbeat
                         }
 
                         DiscordGatewayProtocol.OP_DISPATCH -> {
@@ -257,6 +279,9 @@ class DiscordGatewayPublisher(
                                 }
                                 "RESUMED" -> {
                                     isReady = true
+                                    // Replay the latest snapshot after session resume.
+                                    lastSentRevision = -1L
+                                    lastPresenceUpdateAt = 0L
                                     retryDelayMs = 1_000L
                                     emitState(STATE_CONNECTED, "Discord Gateway session resumed")
                                     updateEvents.trySend(Unit)
@@ -286,6 +311,7 @@ class DiscordGatewayPublisher(
                     }
                 }
                 receivedCloseCode = currentSocket.closeReason.await()?.code?.toInt()
+                onDiagnostic("Gateway socket closed code=${receivedCloseCode ?: "unknown"}")
             } catch (_: TimeoutCancellationException) {
                 runCatching { socket?.close(CloseReason(GATEWAY_RECONNECT_CLOSE_CODE, "Gateway connection timed out")) }
                 emitState(STATE_RECONNECTING, "Gateway connection timed out")
@@ -318,6 +344,14 @@ class DiscordGatewayPublisher(
                 }
                 GatewayCloseDisposition.RETRY_WITH_NEW_SESSION -> clearResumeState()
                 GatewayCloseDisposition.BACKOFF -> reconnectDelayOverride = RATE_LIMIT_BACKOFF_MS
+                GatewayCloseDisposition.TOO_MANY_ACCOUNT_SESSIONS -> {
+                    clearResumeState()
+                    emitState(
+                        STATE_ERROR,
+                        "Too many active Discord Gateway sessions (4015). Close other Rich Presence clients, then connect again. Your saved login is retained."
+                    )
+                    return
+                }
                 GatewayCloseDisposition.TERMINAL_CONFIGURATION_ERROR -> {
                     activeToken = null
                     clearResumeState()
@@ -327,7 +361,7 @@ class DiscordGatewayPublisher(
                 GatewayCloseDisposition.RETRY -> Unit
             }
 
-            emitState(STATE_RECONNECTING, "Discord Gateway connection lost; reconnecting")
+            emitState(STATE_RECONNECTING, "Discord Gateway connection lost (close code ${receivedCloseCode ?: "unknown"}); reconnecting")
             val waitMs = reconnectDelayOverride ?: (retryDelayMs + Random.nextLong(0L, 501L))
             reconnectDelayOverride = null
             delay(waitMs)
@@ -399,7 +433,8 @@ class DiscordGatewayPublisher(
         } catch (_: GatewayPayloadTooLargeException) {
             emitState(STATE_ERROR, "Presence payload exceeds Discord's 4,096-byte limit. Shorten text or remove artwork/buttons.")
             return
-        } catch (_: Exception) {
+        } catch (exception: Exception) {
+            onDiagnostic("Presence opcode-3 write failed (${exception.javaClass.simpleName})")
             socket?.let { requestReconnect(it, "Gateway presence send failed") }
             false
         }
@@ -423,7 +458,13 @@ class DiscordGatewayPublisher(
             .put("d", toJsonValue(envelope.data))
             .toString()
         if (!DiscordGatewayProtocol.payloadFitsLimit(payload)) throw GatewayPayloadTooLargeException()
+        if (envelope.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE) {
+            onDiagnostic("Presence opcode-3 attempt bytes=${payload.toByteArray(Charsets.UTF_8).size}")
+        }
         currentSocket.send(Frame.Text(payload))
+        if (envelope.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE) {
+            onDiagnostic("Presence opcode-3 write completed (local socket)")
+        }
         true
     }
 
@@ -464,7 +505,7 @@ class DiscordGatewayPublisher(
         if (!uri.scheme.equals("wss", ignoreCase = true)) return null
         if (uri.port !in setOf(-1, 443) || uri.userInfo != null) return null
         if (host != "discord.gg" && !host.endsWith(".discord.gg")) return null
-        return "wss://${uri.rawAuthority}/?v=10&encoding=json"
+        return "wss://${uri.rawAuthority}/?v=9&encoding=json"
     }
 
     private fun hasResumeState(): Boolean = synchronized(stateLock) {
@@ -486,9 +527,6 @@ class DiscordGatewayPublisher(
         if (clearSession) clearResumeState()
     }
 
-    private fun androidOsLabel(): String = "Android ${Build.VERSION.RELEASE.orEmpty()}".take(64)
-
-    private fun androidDeviceLabel(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(64)
 
     private fun emitState(state: String, message: String) {
         runCatching { onState(state, message) }
@@ -515,7 +553,8 @@ class DiscordGatewayPublisher(
         private const val MAX_HEARTBEAT_INTERVAL_MS = 120_000L
         private const val CONNECTION_TIMEOUT_MS = 15_000L
         private const val HELLO_TIMEOUT_MS = 15_000L
-        private const val MAX_GATEWAY_FRAME_BYTES = 64L * 1024L
+        private const val MAX_GATEWAY_FRAME_BYTES = 8L * 1024L * 1024L
+        private const val MAX_ACCEPTED_GATEWAY_FRAME_BYTES = 8L * 1024L * 1024L
         private const val MAX_RETRY_DELAY_MS = 30_000L
         private const val RATE_LIMIT_BACKOFF_MS = 30_000L
         private val GATEWAY_RECONNECT_CLOSE_CODE = 4000.toShort()

@@ -5,7 +5,6 @@ import java.util.Locale
 object PresenceRules {
     private val hostPattern = Regex("^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
     private val controlCharacters = Regex("[\\u0000-\\u001f\\u007f]")
-    private val whitespace = Regex("\\s+")
     private val sensitiveLabels = Regex("(^|[.-])(bank|banking|finance|fintech|wallet|payment|pay|invest|trading|broker|crypto|exchange|auth|authenticator|otp|password|passkey|health|medical|clinic|hospital|insurance|government|gov|tax|identity|mail|email|webmail|messaging|messages|whatsapp|telegram|signal|discord|slack|teams|contacts|sms|phone|account|accounts|login|signin|checkout|billing|security|dukcapil|passport|imigrasi|ktp|pharmacy|apotek|medicine|bca|bni|bri|mandiri|seabank|jago|livin|dana|ovo|gopay|bibit|ajaib|bareksa|stockbit|pluang|indodax|pintu|binance|bybit|coinbase|bpjs|jkn|satusehat|credit|loan)([.-]|$)", RegexOption.IGNORE_CASE)
     private val sensitiveHosts = setOf("gmail.com", "outlook.com", "proton.me", "web.whatsapp.com", "web.telegram.org", "discord.com", "seabank.co.id", "paypal.com", "wise.com")
 
@@ -62,7 +61,7 @@ object PresenceRules {
 
         val cleaned = raw
             .replace(controlCharacters, " ")
-            .replace(whitespace, " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
 
         if (cleaned.isEmpty()) return null

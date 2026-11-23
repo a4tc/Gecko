@@ -1,7 +1,6 @@
 package app.geckopresence.host.core
 
 import java.nio.charset.StandardCharsets
-import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
@@ -29,10 +28,15 @@ object AesGcmTokenCodec {
     private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
     private val associatedData = "gecko-presence:discord-user-token:v1".toByteArray(StandardCharsets.UTF_8)
 
-    fun encrypt(token: String, key: SecretKey, random: SecureRandom = SecureRandom()): String {
-        val nonce = ByteArray(NONCE_BYTES).also(random::nextBytes)
+    fun encrypt(token: String, key: SecretKey): String {
         val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, nonce))
+        // Android Keystore generates the IV when randomized encryption is required.
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val nonce = cipher.iv
+            ?: throw IllegalStateException("AES-GCM provider did not generate an IV")
+        require(nonce.size == NONCE_BYTES) {
+            "AES-GCM provider generated an unsupported IV length"
+        }
         cipher.updateAAD(associatedData)
         val encrypted = cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
         val envelope = nonce + encrypted

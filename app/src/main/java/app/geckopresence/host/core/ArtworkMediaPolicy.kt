@@ -5,7 +5,9 @@ import java.security.MessageDigest
 
 /** Pure validation rules for local artwork and externally hosted image references. */
 object ArtworkMediaPolicy {
-    const val MAX_FILE_BYTES = 8 * 1024 * 1024
+    const val MAX_FILE_BYTES = 50 * 1024 * 1024
+    const val MAX_DISCORD_UPLOAD_BYTES = 25_000_000
+    const val MAX_STATIC_BYTES = 8 * 1024 * 1024
     const val MAX_TOTAL_BYTES = 64L * 1024L * 1024L
     const val MAX_ITEMS = 40
     const val MAX_WIDTH_OR_HEIGHT = 8192
@@ -21,6 +23,8 @@ object ArtworkMediaPolicy {
         ) -> ImageFormat("image/png", "png")
         bytes.size >= 12 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
             String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> ImageFormat("image/webp", "webp")
+        bytes.size >= 10 && (String(bytes, 0, 6, Charsets.US_ASCII) == "GIF87a" ||
+            String(bytes, 0, 6, Charsets.US_ASCII) == "GIF89a") -> ImageFormat("image/gif", "gif")
         else -> null
     }
 
@@ -28,29 +32,20 @@ object ArtworkMediaPolicy {
         width in 1..MAX_WIDTH_OR_HEIGHT && height in 1..MAX_WIDTH_OR_HEIGHT &&
             width.toLong() * height.toLong() <= MAX_PIXEL_COUNT
 
-    fun isSafeImgurUrl(value: String): Boolean {
-        if (value.isBlank() || value.length > 512 || value.any { it.isWhitespace() || it.isISOControl() }) return false
-        val uri = runCatching { URI(value) }.getOrNull() ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host?.equals("i.imgur.com", ignoreCase = true) == true &&
-            uri.port in setOf(-1, 443) && uri.userInfo == null && uri.fragment == null
-    }
-
-    fun isValidClientId(value: String): Boolean = value.matches(Regex("^[A-Za-z0-9]{8,64}$"))
-
     fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes).joinToString("") { "%02x".format(it) }
 
     fun isValidStoredFileName(id: String, fileName: String): Boolean {
         if (!id.matches(Regex("^[a-f0-9-]{36}$"))) return false
         val extension = fileName.substringAfterLast('.', "")
-        return extension in setOf("jpg", "png", "webp") && fileName == "$id.$extension"
+        return extension in setOf("jpg", "png", "webp", "gif") && fileName == "$id.$extension"
     }
 
     fun mimeMatchesExtension(mimeType: String, fileName: String): Boolean = when (mimeType) {
         "image/jpeg" -> fileName.endsWith(".jpg")
         "image/png" -> fileName.endsWith(".png")
         "image/webp" -> fileName.endsWith(".webp")
+        "image/gif" -> fileName.endsWith(".gif")
         else -> false
     }
 }

@@ -95,10 +95,11 @@ require("pendingStatus" in publisher and "ALLOWED_PRESENCE_STATUSES" in publishe
 # Vault and explicit user-controlled connection.
 vault = (app / "src/main/java/app/geckopresence/host/DiscordCredentialVault.kt").read_text()
 service = (app / "src/main/java/app/geckopresence/host/PresenceEngineService.kt").read_text()
+main_activity = (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text()
 require("AndroidKeyStore" in vault and "KeyGenParameterSpec" in vault, "credential key uses Android Keystore")
 require("AES/GCM/NoPadding" in (app / "src/main/java/app/geckopresence/host/core/DiscordTokenSecurity.kt").read_text(), "credential envelope uses AES-GCM")
 require("loadForConnection(this)" in service and "gatewayPublisher?.connect(token)" in service, "credential is passed from local vault to Gateway publisher")
-require("RpcCommand.CONNECT -> connectDiscordGateway()" in service and "RpcCommand.DISCONNECT -> disconnectDiscordGateway()" in service, "connection is explicit Developer action")
+require("RpcCommand.CONNECT -> connectDiscordGateway()" in service and "ACTION_TURN_ON" in service and "stopService(Intent(this, PresenceEngineService::class.java))" in main_activity, "one Home Turn On / Turn Off action controls engine and Gateway lifecycle")
 service_start = re.search(r"override fun onCreate\(\).*?\n    }", service, re.S)
 require(service_start is not None and "gatewayPublisher?.connect(" not in service_start.group(0), "engine startup does not auto-connect with stored session")
 require("gatewayPublisher?.publish(winner?.let(PresenceActivityMapper::fromUpdate), selectedStatus)" in service, "arbitrated activity and selected account status reach Gateway publisher")
@@ -106,7 +107,7 @@ require("gatewayPublisher?.shutdown()" in service, "publisher closes on service 
 require("onSessionRejected =" in service and "DiscordCredentialVault.clear(this@PresenceEngineService)" in service, "rejected Gateway credentials are removed from the local vault")
 require("KEY_MANUAL_ACTIVITY_TYPE" in service and "KEY_MANUAL_LARGE_IMAGE" in service and "KEY_MANUAL_BUTTON1_URL" in service, "manual Studio fields are restored into source model")
 require("endsAtEpochSeconds = update.endsAtEpochSeconds" in mapper and "largeImage = update.largeImage" in mapper and "buttons = update.buttons" in mapper, "manual source mapper preserves advanced Rich Presence fields")
-require("largeImage = assetFrom(largeImage, largeTooltip)" in (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text(), "Studio collects large artwork fields")
+require("largeImage = if (isCustomStatus) null else assetFrom(largeImage, largeTooltip)" in (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text(), "Studio collects large artwork fields and excludes artwork for Custom Status")
 main_activity = (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text()
 require('textField("Start timestamp · Unix seconds (optional, defaults to now)", "studio_draft_start_timestamp"' in main_activity, "Studio exposes an optional start timestamp")
 require('putLong(PresenceEngineService.KEY_MANUAL_START, resolvedStart)' in main_activity, "custom start timestamp persists into the running source")
@@ -117,6 +118,9 @@ require("advancedFieldsJson" in (app / "src/main/java/app/geckopresence/host/Pre
 require("previewType.text = selectedType.displayLabel.uppercase()" in (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text(), "Studio preview follows the selected activity type")
 main_activity = (app / "src/main/java/app/geckopresence/host/MainActivity.kt").read_text()
 require("PresenceActivityDisplayFormatter.format(" in main_activity and "previewName.text = preview.headline" in main_activity, "Studio preview uses Discord type-specific Gateway headline formats")
+require("FrameLayout(this)" in main_activity and "Gravity.BOTTOM or Gravity.END" in main_activity and "previewArtworkStack" in main_activity, "Studio preview uses Kizzy-style large artwork with a small-image overlay")
+require("scheduleStudioSync =" in main_activity and "STUDIO_SYNC_DEBOUNCE_MS" in main_activity and "applyStudio(false)" in main_activity, "active Studio edits debounce and auto-publish through shared validation")
+require("ACTION_TURN_ON" in main_activity and "RuntimeTogglePolicy.isOn" in main_activity and "CONNECT DISCORD GATEWAY" not in main_activity, "single Home runtime toggle replaces separate connect controls")
 require("previewDetails.text = preview.details ?: \"No additional details\"" in main_activity, "Studio preview keeps optional Details separate from the type-specific headline")
 require("Discord formats the headline by activity type" in main_activity, "Studio explains type-specific Discord Activity display semantics")
 require('textField("Activity name", "studio_draft_name"' in main_activity, "Studio field label matches Discord Activity.name semantics")
@@ -130,10 +134,8 @@ require("EXTRA_GATEWAY_STATE" in service and "KEY_GATEWAY_STATE" in service, "ru
 # Session import is explicit and local-only; browser storage is never inspected.
 login_path = app / "src/main/java/app/geckopresence/host/DiscordLoginActivity.kt"
 login = login_path.read_text()
-require("DiscordTokenInputPolicy.normalize" in login and "DiscordCredentialVault.save(this, token)" in login, "pasted session is validated and stored only through the local vault")
-require("FLAG_SECURE" in login and "PasswordTransformationMethod" in login and "IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS" in login, "credential input is masked, excluded from autofill and protected from screenshots")
-require("DiscordTokenInputPolicy.MAX_TOKEN_LENGTH" in login and "InputFilter.LengthFilter" in login, "pasted session input is length-bounded before validation")
-require("evaluateJavascript" not in login and "localStorage" not in login and "addJavascriptInterface" not in login, "session import does not scrape WebView storage or expose a JavaScript bridge")
+require("DiscordSessionImportDecoder.decodeJavascriptResult" in login and "DiscordCredentialVault.save(this, token)" in login, "imported session is decoded and stored only through the local vault")
+require("FLAG_SECURE" in login and "addJavascriptInterface" not in login, "login screen blocks screenshots and exposes no JavaScript bridge")
 
 # CI must exercise both product flavors.
 workflow_path = root / ".github/workflows/gecko.yml"
@@ -147,25 +149,36 @@ require("kotlin-compiler-2.0.21.zip" in workflow and "sha256sum -c -" in workflo
 # Advanced per-app profiles and local-first artwork gallery.
 profile_store_path = app / "src/main/java/app/geckopresence/host/AppPresenceProfileStore.kt"
 gallery_path = app / "src/main/java/app/geckopresence/host/ArtworkGalleryStore.kt"
-uploader_path = app / "src/main/java/app/geckopresence/host/ImgurAnonymousUploader.kt"
 profile_store = profile_store_path.read_text()
 gallery = gallery_path.read_text()
-uploader = uploader_path.read_text()
 require("REQUEST_ARTWORK_PICKER" in main_activity and "Intent.ACTION_OPEN_DOCUMENT" in main_activity, "Studio uses Android document picker for local artwork import")
 require("KEY_PENDING_ARTWORK_TARGET" in main_activity and "KEY_PENDING_ARTWORK_ID" in main_activity and "pendingArtworkField" not in main_activity, "artwork destination survives Activity recreation without transient view references")
 require("loadArtworkPreview" in main_activity and "previewLargeArtwork" in main_activity and "previewSmallArtwork" in main_activity, "Studio renders Large and Small artwork previews")
-require("COPY IMAGE ID" in main_activity and "PRESET ID" in main_activity and "COPY PRESET ID" in main_activity, "Gallery and Library expose readable stable IDs and copy actions")
+require("USE LARGE" in main_activity and "localReference(item.id)" in main_activity and "COPY IMAGE ID" not in main_activity and "COPY PRESET ID" in main_activity, "Gallery links artwork by stable reference with no manual ID copy")
 require("ArtworkGalleryStore.previewFile(this, artwork)" in main_activity and "fun previewFile(context: Context, artwork: Artwork)" in (app / "src/main/java/app/geckopresence/host/ArtworkGalleryStore.kt").read_text(), "preview decoding uses a path/size-checked lightweight file accessor while upload retains SHA-256 verification")
 require("PresencePresetStore.duplicate(this, preset.id)" in main_activity and "fun duplicate(context: Context, id: String)" in (app / "src/main/java/app/geckopresence/host/PresencePresetStore.kt").read_text(), "Library supports duplicating a saved preset")
 require("Executors.newSingleThreadExecutor" in main_activity and "artworkPreviewExecutor?.shutdownNow()" in main_activity, "artwork thumbnails decode on one bounded background worker and stop with the Activity")
-require("Upload artwork publicly?" in main_activity and "confirmArtworkUpload" in main_activity and "UPLOAD TO IMGUR PUBLICLY" in main_activity, "artwork upload is explicit and confirmation-gated from both Studio and Gallery")
-require("KEY_IMGUR_CLIENT_ID" in main_activity and "OPEN IMGUR APP REGISTRATION" in main_activity, "Imgur upload requires user-configured Client-ID")
+require("linkImportedArtwork" in main_activity and "confirmArtworkUpload" not in main_activity and "Upload artwork publicly?" not in main_activity, "picked artwork is linked and hosted automatically without a confirmation or paste step")
+auto_artwork = (app / "src/main/java/app/geckopresence/host/ArtworkAutoPublisher.kt").read_text()
+media_tracker = (app / "src/main/java/app/geckopresence/host/MediaSessionPresenceTracker.kt").read_text()
+require("KEY_AUTO_ARTWORK" in auto_artwork and "getBoolean(KEY_AUTO_ARTWORK, true)" in auto_artwork and "isConfigured(context)" in auto_artwork, "automatic artwork is on by default and only active once a webhook is saved")
+require("addOnActiveSessionsChangedListener" in media_tracker and "OnActiveSessionsChangedListener" in media_tracker, "media detector subscribes to active-session changes")
+require("registerCallback(controllerCallback, handler)" in media_tracker and "onMetadataChanged" in media_tracker and "onPlaybackStateChanged" in media_tracker, "media detector listens for metadata and playback changes")
+require("MISSING_SESSION_GRACE_MS" in media_tracker and "POLL_INTERVAL_MS = 10_000L" in media_tracker, "media detector tolerates transient empty session lists and keeps a polling fallback")
+require("INITIAL_ARTWORK_RETRY_DELAY_MS" in media_tracker and "MAX_ARTWORK_RETRY_ATTEMPTS" in media_tracker and "nextArtworkAttemptAtEpochMillis" in media_tracker, "media artwork upload retries transient failures with bounded backoff")
+require("METADATA_KEY_ALBUM_ART_URI" in auto_artwork and "METADATA_KEY_ART_URI" in auto_artwork and "METADATA_KEY_ALBUM_ART" in auto_artwork and "METADATA_KEY_ART" in auto_artwork and "getApplicationIcon" in auto_artwork, "automatic artwork resolver uses media URI/bitmap metadata with app-icon fallback")
+require('uri.scheme.equals("content", ignoreCase = true)' in auto_artwork and 'uri.scheme.equals("https", ignoreCase = true)' not in auto_artwork, "metadata artwork resolver avoids fetching arbitrary network URLs")
+require("ArtworkMediaPolicy.sha256(bytes)" in auto_artwork and "DiscordArtworkPolicy.isFresh" in auto_artwork and "MAX_CACHE_ENTRIES = 200" in auto_artwork and "DiscordArtworkUploader.uploadAndReference" in auto_artwork, "automatic artwork is hash-deduplicated, TTL-cached, bounded and uses the Discord-native uploader")
+require("cacheDir" not in auto_artwork and "deleteWebhookMessage" in auto_artwork, "artwork is processed in memory and obsolete webhook messages are cleaned up")
+require("val activityClassName = event.className" in (app / "src/main/java/app/geckopresence/host/UsageAppTracker.kt").read_text() and "eventClassName = activityClassName" in (app / "src/main/java/app/geckopresence/host/UsageAppTracker.kt").read_text(), "app detection tracks Activity class to ignore stale pause events")
+require("KEY_MANUAL_ACTIVE" in main_activity and "STUDIO_SYNC_DEBOUNCE_MS" in main_activity and "applyStudio(false)" in main_activity, "active Studio overrides debounce valid changes to the Gateway publisher")
+require("DISCORD ARTWORK" in main_activity and "SAVE WEBHOOK" in main_activity and "SEND TEST IMAGE" in main_activity and "ArtworkUploadCredentialVault" in main_activity, "users can configure and test their webhook from Settings")
 require("activityType = profile.activityType" in (app / "src/main/java/app/geckopresence/host/AppPresencePolicy.kt").read_text(), "per-app activity type reaches source arbitration")
 require("accountStatus = profile.accountStatus" in (app / "src/main/java/app/geckopresence/host/AppPresencePolicy.kt").read_text(), "per-app account status reaches the winning presence update")
 require("schemaVersion" in profile_store and "buttons" in profile_store and "accountStatus" in profile_store, "advanced per-app profile schema persists versioned activity fields")
 require("ArtworkMediaPolicy.sha256(bytes)" in gallery and "target.length() != artwork.byteCount" in gallery, "gallery verifies content integrity before external upload")
-require("uploadForTest" in uploader and "loopbackTestEndpoint" in uploader, "uploader test seam is loopback-only")
-require("scripts/test-imgur-upload-dynamic.sh" in workflow, "CI runs the loopback uploader dynamic test")
+require("instanceFollowRedirects = false" in (app / "src/main/java/app/geckopresence/host/DiscordArtworkUploader.kt").read_text() and "discord.com" in (app / "src/main/java/app/geckopresence/host/DiscordArtworkUploader.kt").read_text(), "uploader pins discord.com and never follows redirects")
+require("gecko-cloudflare-artwork-worker" not in workflow and "imgur" not in workflow.lower(), "CI has no third-party artwork hosting steps")
 
 print(f"Source contract checks passed: {len(checks)} assertions, {len(xml_files)} XML files, Ktor Gateway transport, no Social SDK/JNI, secure credential boundary, secure/automation flavors, dual-flavor CI")
 PY

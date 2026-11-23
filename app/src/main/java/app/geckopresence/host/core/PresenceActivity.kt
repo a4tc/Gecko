@@ -14,6 +14,34 @@ enum class PresenceActivityType(val wireValue: Int, val displayLabel: String) {
     }
 }
 
+enum class PresenceTimestampDisplayMode(val displayLabel: String, val storageValue: String) {
+    ELAPSED("Elapsed", "elapsed"),
+    COUNTDOWN("Countdown", "countdown"),
+    ACTIVITY_RANGE("Activity Range", "activity_range");
+
+    companion object {
+        fun fromStorage(value: String?): PresenceTimestampDisplayMode =
+            entries.firstOrNull { it.storageValue == value } ?: ELAPSED
+    }
+}
+
+enum class PresencePlatform(val displayLabel: String, val wireValue: String?) {
+    DESKTOP("PC / Desktop", "desktop"),
+    PLAYSTATION_4("PlayStation 4", "ps4"),
+    PLAYSTATION_5("PlayStation 5", "ps5"),
+    XBOX("Xbox", "xbox"),
+    SAMSUNG("Samsung", "samsung"),
+    ANDROID("Android", "android"),
+    IOS("iOS", "ios"),
+    EMBEDDED("Embedded", "embedded"),
+    NONE("None", null);
+
+    companion object {
+        fun fromWireValue(value: String?): PresencePlatform? =
+            entries.firstOrNull { it.wireValue != null && it.wireValue == value }
+    }
+}
+
 data class PresenceAsset(
     val image: String,
     val tooltip: String? = null,
@@ -42,6 +70,8 @@ data class PresenceActivity(
     val sourceId: String = "manual",
     val priority: Int = 0,
     val expiresAtEpochMillis: Long = 0L,
+    val timestampDisplayMode: PresenceTimestampDisplayMode = PresenceTimestampDisplayMode.ELAPSED,
+    val platform: PresencePlatform? = null,
 ) {
     fun validate(): List<String> = buildList {
         if (name.isBlank() || name.length > 128) add("name must contain 1–128 characters")
@@ -73,14 +103,15 @@ data class PresenceActivity(
         }
         listOfNotNull(largeImage, smallImage).forEachIndexed { index, asset ->
             val slot = if (index == 0 && largeImage != null) "large" else "small"
-            if (!isAllowedImageReference(asset.image)) add("$slot image reference must be HTTPS, a Discord media-proxy reference, or an application asset ID")
+            if (!isAllowedImageReference(asset.image)) add("$slot image reference must be HTTPS, a Discord media-proxy reference, a Gecko gallery reference, or an application asset ID")
             if (asset.tooltip != null && asset.tooltip.length !in 2..128) add("$slot image tooltip must contain 2–128 characters")
             if (asset.clickUrl != null && !isSafeHttpsUrl(asset.clickUrl, 256)) add("$slot image click URL must be safe HTTPS and at most 256 characters")
         }
     }
 
     private fun isAllowedImageReference(value: String): Boolean {
-        if (value.isBlank() || value.length > 300 || value.any(Char::isWhitespace)) return false
+        if (value.isBlank() || value.length > 520 || value.any(Char::isWhitespace)) return false
+        if (DiscordArtworkPolicy.isLocalReference(value)) return true
         if (value.startsWith("mp:", ignoreCase = true)) return value.substring(3).isNotBlank()
         if (value.all(Char::isDigit)) return value.length in 16..22
         if (APPLICATION_ASSET_KEY_PATTERN.matches(value)) return true
@@ -126,7 +157,7 @@ object PresenceActivityDisplayFormatter {
             )
             PresenceActivityType.LISTENING -> Preview("Listening to $cleanName", cleanDetails, cleanState)
             PresenceActivityType.WATCHING -> Preview("Watching $cleanName", cleanDetails, cleanState)
-            PresenceActivityType.CUSTOM_STATUS -> Preview(cleanState ?: "Custom Status", cleanDetails, null)
+            PresenceActivityType.CUSTOM_STATUS -> Preview(cleanState ?: "Custom Status", null, null)
             PresenceActivityType.COMPETING -> Preview("Competing in $cleanName", cleanDetails, cleanState)
         }
     }

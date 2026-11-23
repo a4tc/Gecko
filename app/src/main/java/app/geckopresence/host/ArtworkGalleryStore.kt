@@ -11,7 +11,7 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Private local artwork library. Gallery files are never uploaded unless the user confirms. */
+/** Private local artwork library. Hosting for Discord is resolved on demand by ArtworkAutoPublisher; no remote URL is persisted here. */
 object ArtworkGalleryStore {
     const val MAX_FILE_BYTES = ArtworkMediaPolicy.MAX_FILE_BYTES
     private const val MAX_ITEMS = ArtworkMediaPolicy.MAX_ITEMS
@@ -26,7 +26,6 @@ object ArtworkGalleryStore {
         val mimeType: String,
         val byteCount: Long,
         val sha256: String,
-        val remoteUrl: String? = null,
         val createdAt: Long,
     )
 
@@ -41,6 +40,31 @@ object ArtworkGalleryStore {
         if (!uri.scheme.equals("content", ignoreCase = true)) {
             return ImportResult.Rejected("The document provider returned an unsupported URI.")
         }
+        val bytes = try {
+            app.contentResolver.openInputStream(uri)?.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 50 MiB original-file limit.")
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: return ImportResult.Rejected("The selected image could not be opened.")
+        } catch (_: Exception) {
+            return ImportResult.Rejected("The selected image could not be read.")
+        }
+        return importBytes(app, bytes, queryDisplayName(app, uri))
+    }
+
+    fun importEditedBytes(context: Context, bytes: ByteArray, displayName: String): ImportResult =
+        importBytes(context.applicationContext, bytes, displayName)
+
+    private fun importBytes(context: Context, bytes: ByteArray, requestedDisplayName: String): ImportResult {
+        val app = context.applicationContext
         val directory = galleryDirectory(app).apply { mkdirs() }
         val privateRoot = app.filesDir.canonicalFile
         val canonicalDirectory = directory.canonicalFile
@@ -52,28 +76,21 @@ object ArtworkGalleryStore {
             runCatching { candidate.isFile && candidate.canonicalFile.parentFile == canonicalDirectory }.getOrDefault(false)
         }
         if (localFiles.size >= MAX_ITEMS) return ImportResult.Rejected("Gallery is full (maximum $MAX_ITEMS images).")
-        val bytes = try {
-            app.contentResolver.openInputStream(uri)?.use { input ->
-                val output = java.io.ByteArrayOutputStream()
-                val buffer = ByteArray(16 * 1024)
-                var total = 0
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    total += count
-                    if (total > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 8 MiB limit.")
-                    output.write(buffer, 0, count)
-                }
-                output.toByteArray()
-            } ?: return ImportResult.Rejected("The selected image could not be opened.")
-        } catch (_: Exception) {
-            return ImportResult.Rejected("The selected image could not be read.")
+        if (bytes.isEmpty() || bytes.size > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 50 MiB original-file limit.")
+        val detected = ArtworkMediaPolicy.detectImage(bytes)
+            ?: return ImportResult.Rejected("Only JPEG, PNG, WebP and GIF images are supported.")
+        val width: Int
+        val height: Int
+        if (detected.extension == "gif") {
+            if (bytes.size < 10) return ImportResult.Rejected("The GIF header is incomplete.")
+            width = (bytes[6].toInt() and 0xFF) or ((bytes[7].toInt() and 0xFF) shl 8)
+            height = (bytes[8].toInt() and 0xFF) or ((bytes[9].toInt() and 0xFF) shl 8)
+        } else {
+            val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, dimensions)
+            width = dimensions.outWidth
+            height = dimensions.outHeight
         }
-        val detected = ArtworkMediaPolicy.detectImage(bytes) ?: return ImportResult.Rejected("Only JPEG, PNG, and WebP images are supported.")
-        val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, dimensions)
-        val width = dimensions.outWidth
-        val height = dimensions.outHeight
         if (!ArtworkMediaPolicy.hasValidDimensions(width, height)) {
             return ImportResult.Rejected("Image dimensions are invalid or exceed 40 megapixels.")
         }
@@ -91,8 +108,10 @@ object ArtworkGalleryStore {
             destination.delete()
             return ImportResult.Rejected("Could not save the image in Gecko's private storage.")
         }
-        val displayName = queryDisplayName(app, uri).take(80).ifBlank { "Artwork ${current.size + 1}" }
-        val artwork = Artwork(id, displayName, fileName, detected.mimeType, bytes.size.toLong(), digest, null, System.currentTimeMillis())
+        val displayName = requestedDisplayName.take(80)
+            .replace(Regex("[\\p{Cntrl}/\\\\]"), "_")
+            .ifBlank { "Artwork ${current.size + 1}" }
+        val artwork = Artwork(id, displayName, fileName, detected.mimeType, bytes.size.toLong(), digest, System.currentTimeMillis())
         val saved = preferences(app).edit().putString(PREFIX + id, artwork.toJson().toString()).commit()
         if (!saved) {
             destination.delete()
@@ -103,7 +122,7 @@ object ArtworkGalleryStore {
 
     fun list(context: Context): List<Artwork> = preferences(context).all.entries
         .asSequence().filter { it.key.startsWith(PREFIX) }
-        .mapNotNull { (_, value) -> (value as? String)?.let(::decode) }
+        .mapNotNull { (_, value) -> (value as? String)?.let { decode(it) } }
         .sortedByDescending { it.createdAt }
         .toList()
 
@@ -132,13 +151,6 @@ object ArtworkGalleryStore {
         }.getOrNull() ?: return null
         if (digest != artwork.sha256) return null
         return target
-    }
-
-    fun markUploaded(context: Context, id: String, remoteUrl: String): Boolean {
-        if (!ArtworkMediaPolicy.isSafeImgurUrl(remoteUrl)) return false
-        val app = context.applicationContext
-        val existing = list(app).firstOrNull { it.id == id } ?: return false
-        return preferences(app).edit().putString(PREFIX + id, existing.copy(remoteUrl = remoteUrl).toJson().toString()).commit()
     }
 
     fun delete(context: Context, id: String): Boolean {
@@ -173,7 +185,7 @@ object ArtworkGalleryStore {
 
     private fun Artwork.toJson() = JSONObject().put("id", id).put("displayName", displayName)
         .put("fileName", fileName).put("mimeType", mimeType).put("byteCount", byteCount)
-        .put("sha256", sha256).put("remoteUrl", remoteUrl.orEmpty()).put("createdAt", createdAt)
+        .put("sha256", sha256).put("createdAt", createdAt)
 
     private fun decode(raw: String): Artwork? = runCatching {
         val json = JSONObject(raw)
@@ -181,10 +193,9 @@ object ArtworkGalleryStore {
             id = json.getString("id"), displayName = json.getString("displayName"),
             fileName = json.getString("fileName"), mimeType = json.getString("mimeType"),
             byteCount = json.getLong("byteCount"), sha256 = json.getString("sha256"),
-            remoteUrl = json.optString("remoteUrl").takeIf(String::isNotBlank), createdAt = json.getLong("createdAt"),
+            createdAt = json.getLong("createdAt"),
         )
         if (!ArtworkMediaPolicy.isValidStoredFileName(item.id, item.fileName) || item.byteCount !in 1..MAX_FILE_BYTES.toLong() ||
-            !Regex("^[a-f0-9]{64}$").matches(item.sha256) || !ArtworkMediaPolicy.mimeMatchesExtension(item.mimeType, item.fileName) ||
-            (item.remoteUrl != null && !ArtworkMediaPolicy.isSafeImgurUrl(item.remoteUrl))) null else item
+            !Regex("^[a-f0-9]{64}$").matches(item.sha256) || !ArtworkMediaPolicy.mimeMatchesExtension(item.mimeType, item.fileName)) null else item
     }.getOrNull()
 }

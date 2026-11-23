@@ -26,7 +26,7 @@ object DiscordGatewayProtocol {
     const val OP_HELLO = 10
     const val OP_HEARTBEAT_ACK = 11
 
-    const val GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
+    const val GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json"
     const val MAX_PAYLOAD_BYTES = 4_096
     const val MIN_PRESENCE_INTERVAL_MS = 4_100L
 
@@ -37,12 +37,12 @@ object DiscordGatewayProtocol {
     fun identify(token: String, operatingSystem: String, device: String): GatewayEnvelope = GatewayEnvelope(
         op = OP_IDENTIFY,
         data = linkedMapOf(
-            "capabilities" to 65,
+            "capabilities" to 16381,
             "compress" to false,
             "largeThreshold" to 100,
             "properties" to linkedMapOf(
                 "os" to operatingSystem,
-                "browser" to "Gecko Presence",
+                "browser" to "Discord Android",
                 "device" to device,
             ),
             "token" to token,
@@ -60,7 +60,7 @@ object DiscordGatewayProtocol {
         ),
     )
 
-    fun presenceUpdate(activity: PresenceActivity?, applicationId: Long, status: String = "online"): GatewayEnvelope {
+    fun presenceUpdate(activity: PresenceActivity?, applicationId: Long, status: String = "online", nowMillis: Long = System.currentTimeMillis()): GatewayEnvelope {
         require(status in ALLOWED_STATUSES) { "Unsupported Discord presence status" }
         activity?.let { candidate ->
             val errors = candidate.validate()
@@ -74,10 +74,10 @@ object DiscordGatewayProtocol {
         return GatewayEnvelope(
             op = OP_PRESENCE_UPDATE,
             data = linkedMapOf(
-                "since" to GatewayJsonNull,
+                "since" to if (activity == null) 0L else nowMillis,
                 "activities" to activities,
                 "status" to status,
-                "afk" to false,
+                "afk" to (activity == null),
             ),
         )
     }
@@ -85,16 +85,35 @@ object DiscordGatewayProtocol {
     private val ALLOWED_STATUSES = setOf("online", "idle", "dnd", "invisible", "offline")
 
     private fun PresenceActivity.toGatewayActivity(applicationId: Long): Map<String, Any?> = buildMap {
+        platform?.wireValue?.let { put("platform", it) }
+        if (type == PresenceActivityType.CUSTOM_STATUS) {
+            put("name", "Custom Status")
+            put("type", type.wireValue)
+            put("state", state!!)
+            return@buildMap
+        }
+
         put("name", name)
         put("type", type.wireValue)
+        put("status_display_type", 0)
         details?.takeIf(String::isNotBlank)?.let { put("details", it) }
         state?.takeIf(String::isNotBlank)?.let { put("state", it) }
         streamUrl?.takeIf(String::isNotBlank)?.let { put("url", it) }
-        if (applicationId > 0L) put("application_id", applicationId.toString())
+        if (applicationId > 0L && (largeImage != null || smallImage != null || buttons.isNotEmpty())) {
+            put("application_id", applicationId.toString())
+        }
 
         val timestamps = buildMap<String, Any> {
-            startedAtEpochSeconds?.let { put("start", it * 1_000L) }
-            endsAtEpochSeconds?.let { put("end", it * 1_000L) }
+            when (timestampDisplayMode) {
+                PresenceTimestampDisplayMode.ELAPSED ->
+                    startedAtEpochSeconds?.let { put("start", it * 1_000L) }
+                PresenceTimestampDisplayMode.COUNTDOWN ->
+                    endsAtEpochSeconds?.let { put("end", it * 1_000L) }
+                PresenceTimestampDisplayMode.ACTIVITY_RANGE -> {
+                    startedAtEpochSeconds?.let { put("start", it * 1_000L) }
+                    endsAtEpochSeconds?.let { put("end", it * 1_000L) }
+                }
+            }
         }
         if (timestamps.isNotEmpty()) put("timestamps", timestamps)
 
@@ -113,9 +132,8 @@ object DiscordGatewayProtocol {
         if (assets.isNotEmpty()) put("assets", assets)
 
         if (buttons.isNotEmpty()) {
-            put("buttons", buttons.map { button ->
-                linkedMapOf("label" to button.label, "url" to button.url)
-            })
+            put("buttons", buttons.map(PresenceButton::label))
+            put("metadata", mapOf("button_urls" to buttons.map(PresenceButton::url)))
         }
     }
 }

@@ -9,13 +9,20 @@ OUT="${TMPDIR:-/tmp}/gecko-presence-core-tests.jar"
 "$KOTLINC" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceRules.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/ArtworkMediaPolicy.kt" \
+  "$ROOT/app/src/main/java/app/geckopresence/host/core/DiscordArtworkPolicy.kt" \
+  "$ROOT/app/src/main/java/app/geckopresence/host/core/ArtworkUploadTokenSecurity.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceActivityMapper.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/AppPresenceProfile.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceUpdate.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceSourceArbiter.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/AppActivityRules.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/ForegroundEventReducer.kt" \
+  "$ROOT/tests/ForegroundEventReducerSelfTest.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/RpcStartupPolicy.kt" \
+  "$ROOT/app/src/main/java/app/geckopresence/host/core/RuntimeTogglePolicy.kt" \
+  "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceTimestampPolicy.kt" \
+  "$ROOT/tests/PresenceTimestampPolicySelfTest.kt" \
+  "$ROOT/tests/RuntimeTogglePolicySelfTest.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/DiscordTokenSecurity.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/PresenceActivity.kt" \
   "$ROOT/app/src/main/java/app/geckopresence/host/core/DiscordGatewayProtocol.kt" \
@@ -28,6 +35,8 @@ OUT="${TMPDIR:-/tmp}/gecko-presence-core-tests.jar"
   "$ROOT/tests/AppPresenceProfileSelfTest.kt" \
   "$ROOT/tests/GatewayFuzzSelfTest.kt" \
   "$ROOT/tests/ArtworkMediaPolicySelfTest.kt" \
+  "$ROOT/tests/ArtworkUploadSecuritySelfTest.kt" \
+  "$ROOT/tests/DiscordArtworkPolicySelfTest.kt" \
   -include-runtime -d "$OUT"
 "$JAVA" -cp "$OUT" app.geckopresence.host.core.PresenceRulesSelfTestKt
 "$JAVA" -cp "$OUT" app.geckopresence.host.core.DiscordTokenSecuritySelfTest
@@ -35,3 +44,8 @@ OUT="${TMPDIR:-/tmp}/gecko-presence-core-tests.jar"
 "$JAVA" -cp "$OUT" app.geckopresence.host.core.AppPresenceProfileSelfTestKt
 "$JAVA" -cp "$OUT" app.geckopresence.host.core.GatewayFuzzSelfTestKt
 "$JAVA" -cp "$OUT" app.geckopresence.host.core.ArtworkMediaPolicySelfTestKt
+"$JAVA" -cp "$OUT" app.geckopresence.host.core.ForegroundEventReducerSelfTestKt
+"$JAVA" -cp "$OUT" app.geckopresence.host.core.RuntimeTogglePolicySelfTestKt
+"$JAVA" -cp "$OUT" app.geckopresence.host.core.PresenceTimestampPolicySelfTestKt
+"$JAVA" -cp "$OUT" app.geckopresence.host.core.ArtworkUploadSecuritySelfTestKt
+"$JAVA" -cp "$OUT" app.geckopresence.host.core.DiscordArtworkPolicySelfTestKt

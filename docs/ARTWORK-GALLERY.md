@@ -1,24 +1,11 @@
-# Artwork Gallery — Gecko Presence 0.6.6
+# Artwork Gallery and automatic hosting
 
-## Local-first flow
+1. Pick an image in Studio or an app profile. Gecko validates it (JPEG/PNG/WebP, magic bytes, 8 MiB, dimension limits) and stores it privately.
+2. Studio stores a stable `gecko:<id>` reference. No ID is ever copied or pasted.
+3. When presence is published, the engine resolves that reference: the image is posted to your own private Discord webhook, the resulting attachment link is registered with Discord's external-assets endpoint, and the returned `mp:` media-proxy reference is what Rich Presence uses.
+4. References are cached by SHA-256 for 12 hours. Discord attachment links are signed and expire, so an older reference is rebuilt on demand and the obsolete webhook message is deleted. The cache is capped at 200 entries.
+5. Media covers and app icons use the same pipeline automatically.
 
-1. In Studio, choose **Pick Large Artwork** or **Pick Small Artwork**.
-2. Android's document picker opens. Gecko copies the chosen file into its private gallery.
-3. Gecko checks file signature, dimensions, size, storage quota, and SHA-256. Supported formats: JPEG, PNG, WebP.
-4. To use the image in Discord Rich Presence, configure your own Imgur Client-ID in Settings.
-5. Gecko asks for confirmation before upload. Confirming sends the selected image to Imgur's anonymous image endpoint.
-6. The returned `https://i.imgur.com/...` URL is inserted into the selected Studio field and saved to the local gallery record.
+One-time setup: Server Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL, then paste it under Settings > Discord Artwork and press SEND TEST IMAGE.
 
-## Limits
-
-- 8 MiB per image.
-- 40 gallery images.
-- 64 MiB total local gallery storage.
-- Maximum 8,192 pixels per dimension and 40 megapixels total.
-- No SVG, GIF, HEIC, animated image, or arbitrary file upload.
-
-## Privacy
-
-Local images remain app-private and are not uploaded automatically. An upload is public to anyone who obtains its URL. The Imgur Client-ID is a public application identifier, not an Imgur account password or Client Secret. Gecko does not request Imgur OAuth access. Deleting a gallery entry deletes only the local copy; it does not delete the remote Imgur image.
-
-Imgur documents anonymous API uploads using `Authorization: Client-ID {client_id}` after registering an application. See [Imgur API documentation](https://apidocs.imgur.com/).
+Limits: artwork reachable through a Discord media link can be viewed by anyone who obtains that link. Deleting a Gallery entry removes only the local copy. Whether Discord keeps a registered media-proxy copy after the source attachment expires is not documented; Gecko therefore refreshes references on a TTL instead of assuming permanence.
