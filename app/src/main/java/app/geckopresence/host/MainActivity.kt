@@ -53,6 +53,7 @@ import app.geckopresence.host.core.PresenceRules
 import app.geckopresence.host.core.PresenceActivityMapper
 import app.geckopresence.host.core.AppPresenceProfile
 import app.geckopresence.host.core.RuntimeTogglePolicy
+import app.geckopresence.host.core.PresenceTimestampPolicy
 
 class MainActivity : Activity() {
     private val COLOR_BACKGROUND: Int get() = getColor(R.color.screen_bg)
