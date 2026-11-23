@@ -61,6 +61,7 @@ object PresenceRules {
 
         val cleaned = raw
             .replace(controlCharacters, " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
 
         if (cleaned.isEmpty()) return null
