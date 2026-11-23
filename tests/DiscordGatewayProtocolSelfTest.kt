@@ -45,6 +45,7 @@ object DiscordGatewayProtocolSelfTest {
             state = "YouTube",
             startedAtEpochSeconds = 1_700_000_000,
             endsAtEpochSeconds = 1_700_003_600,
+            timestampDisplayMode = PresenceTimestampDisplayMode.ACTIVITY_RANGE,
             largeImage = PresenceAsset("https://cdn.example/large.webp", "Large artwork", "https://example.com/large"),
             smallImage = PresenceAsset("https://cdn.example/small.webp", "Small artwork"),
             buttons = listOf(PresenceButton("Open source", "https://example.com")),
