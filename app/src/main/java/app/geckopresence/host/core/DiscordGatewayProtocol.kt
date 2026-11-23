@@ -85,6 +85,7 @@ object DiscordGatewayProtocol {
     private val ALLOWED_STATUSES = setOf("online", "idle", "dnd", "invisible", "offline")
 
     private fun PresenceActivity.toGatewayActivity(applicationId: Long): Map<String, Any?> = buildMap {
+        platform?.wireValue?.let { put("platform", it) }
         if (type == PresenceActivityType.CUSTOM_STATUS) {
             put("name", "Custom Status")
             put("type", type.wireValue)
@@ -103,8 +104,16 @@ object DiscordGatewayProtocol {
         }
 
         val timestamps = buildMap<String, Any> {
-            startedAtEpochSeconds?.let { put("start", it * 1_000L) }
-            endsAtEpochSeconds?.let { put("end", it * 1_000L) }
+            when (timestampDisplayMode) {
+                PresenceTimestampDisplayMode.ELAPSED ->
+                    startedAtEpochSeconds?.let { put("start", it * 1_000L) }
+                PresenceTimestampDisplayMode.COUNTDOWN ->
+                    endsAtEpochSeconds?.let { put("end", it * 1_000L) }
+                PresenceTimestampDisplayMode.ACTIVITY_RANGE -> {
+                    startedAtEpochSeconds?.let { put("start", it * 1_000L) }
+                    endsAtEpochSeconds?.let { put("end", it * 1_000L) }
+                }
+            }
         }
         if (timestamps.isNotEmpty()) put("timestamps", timestamps)
 

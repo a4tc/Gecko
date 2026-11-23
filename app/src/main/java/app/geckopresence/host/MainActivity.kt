@@ -505,8 +505,10 @@ class MainActivity : Activity() {
         previewCopy.addView(previewState, marginTop(4))
         previewActivityRow.addView(previewCopy, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         previewCard.addView(previewActivityRow, marginTop(12))
-        val previewTimestamp = text("STARTS NOW", 10, COLOR_MUTED, mono = true)
+        val previewTimestamp = text("ELAPSED · STARTS NOW", 10, COLOR_MUTED, mono = true)
         previewCard.addView(previewTimestamp, marginTop(12))
+        val previewPlatform = text("PLATFORM · NONE", 10, COLOR_MUTED, mono = true)
+        previewCard.addView(previewPlatform, marginTop(5))
         val previewButtons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -547,6 +549,23 @@ class MainActivity : Activity() {
             "studio_draft_account_status_index",
             listOf("Online", "Idle", "Do Not Disturb", "Invisible", "Offline"),
             0,
+            onSelectionChanged = { updatePreview(); scheduleStudioSync() },
+        )
+        val timestampDisplayMode = optionSpinner(
+            "Timer display mode",
+            "studio_draft_timestamp_display_mode_index",
+            listOf("Elapsed", "Countdown", "Activity Range"),
+            0,
+            onSelectionChanged = { updatePreview(); scheduleStudioSync() },
+        )
+        val platform = optionSpinner(
+            "Platform",
+            "studio_draft_platform_index",
+            listOf(
+                "PC / Desktop", "PlayStation 4", "PlayStation 5", "Xbox",
+                "Samsung", "Android", "iOS", "Embedded", "None",
+            ),
+            8,
             onSelectionChanged = { updatePreview(); scheduleStudioSync() },
         )
         val uriInput = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -639,11 +658,26 @@ class MainActivity : Activity() {
                     settings.getLong(PresenceEngineService.KEY_MANUAL_START, 0L).takeIf { it > 0L }
                 } else null
             val endSeconds = endsAt.text.toString().trim().toLongOrNull()
+                ?: if (settings.getBoolean(PresenceEngineService.KEY_MANUAL_ACTIVE, false)) {
+                    settings.getString(PresenceEngineService.KEY_MANUAL_END, null)?.toLongOrNull()
+                } else null
             startTimestampValue.text = "START · ${formatPresenceTimestamp(startSeconds) ?: "Not set (defaults to now)"}"
             endTimestampValue.text = "END · ${formatPresenceTimestamp(endSeconds) ?: "Not set"}"
-            previewTimestamp.text = if (startSeconds != null) {
-                "STARTS · ${formatPresenceTimestamp(startSeconds)}"
-            } else "STARTS NOW"
+            val selectedTimerMode = app.geckopresence.host.core.PresenceTimestampDisplayMode.entries
+                .getOrElse(timestampDisplayMode.selectedItemPosition) {
+                    app.geckopresence.host.core.PresenceTimestampDisplayMode.ELAPSED
+                }
+            previewTimestamp.text = when (selectedTimerMode) {
+                app.geckopresence.host.core.PresenceTimestampDisplayMode.ELAPSED ->
+                    startSeconds?.let { "ELAPSED · START ${formatPresenceTimestamp(it)}" } ?: "ELAPSED · STARTS NOW"
+                app.geckopresence.host.core.PresenceTimestampDisplayMode.COUNTDOWN ->
+                    endSeconds?.let { "COUNTDOWN · END ${formatPresenceTimestamp(it)}" } ?: "COUNTDOWN · END NOT SET"
+                app.geckopresence.host.core.PresenceTimestampDisplayMode.ACTIVITY_RANGE ->
+                    "RANGE · ${formatPresenceTimestamp(startSeconds) ?: "STARTS NOW"} → ${formatPresenceTimestamp(endSeconds) ?: "END NOT SET"}"
+            }
+            val selectedPlatform = app.geckopresence.host.core.PresencePlatform.entries
+                .getOrElse(platform.selectedItemPosition) { app.geckopresence.host.core.PresencePlatform.NONE }
+            previewPlatform.text = "PLATFORM · ${selectedPlatform.displayLabel.uppercase()}"
             previewTimestamp.visibility = if (isCustomStatus) View.GONE else View.VISIBLE
             previewButtonOne.text = button1Label.text.toString().trim()
             previewButtonTwo.text = button2Label.text.toString().trim()
@@ -684,6 +718,10 @@ class MainActivity : Activity() {
         editor.addView(activityType, marginTop(6))
         editor.addView(text("ACCOUNT STATUS", 10, COLOR_MUTED, true, mono = true), marginTop(12))
         editor.addView(accountStatus, marginTop(6))
+        editor.addView(text("TIMER DISPLAY MODE", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        editor.addView(timestampDisplayMode, marginTop(6))
+        editor.addView(text("NATIVE PLATFORM", 10, COLOR_MUTED, true, mono = true), marginTop(12))
+        editor.addView(platform, marginTop(6))
         editor.addView(streamUrlLabel, marginTop(12))
         editor.addView(streamUrl, marginTop(6))
         artworkSection.addView(text("ARTWORK · LARGE IMAGE", 10, COLOR_ACCENT, true, mono = true), marginTop(16))
@@ -762,6 +800,14 @@ class MainActivity : Activity() {
                 state = currentState,
                 startedAtEpochSeconds = resolvedStart.takeUnless { isCustomStatus },
                 endsAtEpochSeconds = endValue,
+                timestampDisplayMode = app.geckopresence.host.core.PresenceTimestampDisplayMode.entries
+                    .getOrElse(timestampDisplayMode.selectedItemPosition) {
+                        app.geckopresence.host.core.PresenceTimestampDisplayMode.ELAPSED
+                    },
+                platform = app.geckopresence.host.core.PresencePlatform.entries
+                    .getOrElse(platform.selectedItemPosition) {
+                        app.geckopresence.host.core.PresencePlatform.NONE
+                    }.takeUnless { it == app.geckopresence.host.core.PresencePlatform.NONE },
                 largeImage = if (isCustomStatus) null else assetFrom(largeImage, largeTooltip),
                 smallImage = if (isCustomStatus) null else assetFrom(smallImage, smallTooltip),
                 buttons = buttons,
@@ -783,6 +829,20 @@ class MainActivity : Activity() {
                 .putInt(PresenceEngineService.KEY_MANUAL_ACTIVITY_TYPE, selectedType.wireValue)
                 .putLong(PresenceEngineService.KEY_MANUAL_START, resolvedStart)
                 .putString(PresenceEngineService.KEY_MANUAL_END, endValue?.toString().orEmpty())
+                .putString(
+                    PresenceEngineService.KEY_MANUAL_TIMESTAMP_DISPLAY_MODE,
+                    app.geckopresence.host.core.PresenceTimestampDisplayMode.entries
+                        .getOrElse(timestampDisplayMode.selectedItemPosition) {
+                            app.geckopresence.host.core.PresenceTimestampDisplayMode.ELAPSED
+                        }.storageValue,
+                )
+                .putString(
+                    PresenceEngineService.KEY_MANUAL_PLATFORM,
+                    app.geckopresence.host.core.PresencePlatform.entries
+                        .getOrElse(platform.selectedItemPosition) {
+                            app.geckopresence.host.core.PresencePlatform.NONE
+                        }.wireValue.orEmpty(),
+                )
                 .putString(
                     PresenceEngineService.KEY_MANUAL_STREAM_URL,
                     if (selectedType == app.geckopresence.host.core.PresenceActivityType.STREAMING)
@@ -2047,6 +2107,8 @@ class MainActivity : Activity() {
             "studio_draft_button2_url",
             "studio_draft_start_timestamp",
             "studio_draft_end_timestamp",
+            "studio_draft_timestamp_display_mode_index",
+            "studio_draft_platform_index",
         )
         return org.json.JSONObject().apply {
             keys.forEach { key ->
@@ -2072,12 +2134,19 @@ class MainActivity : Activity() {
             "studio_draft_button2_url",
             "studio_draft_start_timestamp",
             "studio_draft_end_timestamp",
+            "studio_draft_timestamp_display_mode_index",
+            "studio_draft_platform_index",
         )
         val editor = settings.edit()
         keys.forEach { key ->
             if (!json.has(key)) return@forEach
             if (key.endsWith("_index") || key.endsWith("_type")) {
-                editor.putInt(key, json.optInt(key, 0).coerceIn(0, 5))
+                val maxIndex = when (key) {
+                    "studio_draft_timestamp_display_mode_index" -> 2
+                    "studio_draft_platform_index" -> 8
+                    else -> 5
+                }
+                editor.putInt(key, json.optInt(key, 0).coerceIn(0, maxIndex))
             } else {
                 editor.putString(key, json.optString(key).take(512))
             }

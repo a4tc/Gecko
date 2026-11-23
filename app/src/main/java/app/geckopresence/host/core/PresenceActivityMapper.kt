@@ -12,6 +12,8 @@ object PresenceActivityMapper {
         state = stateLine(update.state),
         startedAtEpochSeconds = update.startTimestampSeconds.takeIf { it > 0L },
         endsAtEpochSeconds = update.endsAtEpochSeconds,
+        timestampDisplayMode = update.timestampDisplayMode,
+        platform = update.platform,
         largeImage = update.largeImage,
         smallImage = update.smallImage,
         buttons = update.buttons,

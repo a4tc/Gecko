@@ -429,6 +429,12 @@ class PresenceEngineService : Service() {
                 priority = 100,
                 activityType = activityType,
                 endsAtEpochSeconds = settings.getString(KEY_MANUAL_END, null)?.toLongOrNull(),
+                timestampDisplayMode = app.geckopresence.host.core.PresenceTimestampDisplayMode.fromStorage(
+                    settings.getString(KEY_MANUAL_TIMESTAMP_DISPLAY_MODE, null),
+                ),
+                platform = app.geckopresence.host.core.PresencePlatform.fromWireValue(
+                    settings.getString(KEY_MANUAL_PLATFORM, null),
+                ),
                 largeImage = asset(KEY_MANUAL_LARGE_IMAGE, KEY_MANUAL_LARGE_TOOLTIP),
                 smallImage = asset(KEY_MANUAL_SMALL_IMAGE, KEY_MANUAL_SMALL_TOOLTIP),
                 buttons = buttons,
@@ -676,6 +682,8 @@ class PresenceEngineService : Service() {
         const val KEY_MANUAL_BUTTON2_LABEL = "manual_presence_button2_label"
         const val KEY_MANUAL_BUTTON2_URL = "manual_presence_button2_url"
         const val KEY_MANUAL_END = "manual_presence_end"
+        const val KEY_MANUAL_TIMESTAMP_DISPLAY_MODE = "manual_presence_timestamp_display_mode"
+        const val KEY_MANUAL_PLATFORM = "manual_presence_platform"
         const val KEY_MANUAL_ACTIVE = "manual_presence_active"
         const val KEY_MANUAL_NAME = "manual_presence_name"
         const val KEY_MANUAL_DETAILS = "manual_presence_details"

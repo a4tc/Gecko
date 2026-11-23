@@ -14,6 +14,34 @@ enum class PresenceActivityType(val wireValue: Int, val displayLabel: String) {
     }
 }
 
+enum class PresenceTimestampDisplayMode(val displayLabel: String, val storageValue: String) {
+    ELAPSED("Elapsed", "elapsed"),
+    COUNTDOWN("Countdown", "countdown"),
+    ACTIVITY_RANGE("Activity Range", "activity_range");
+
+    companion object {
+        fun fromStorage(value: String?): PresenceTimestampDisplayMode =
+            entries.firstOrNull { it.storageValue == value } ?: ELAPSED
+    }
+}
+
+enum class PresencePlatform(val displayLabel: String, val wireValue: String?) {
+    DESKTOP("PC / Desktop", "desktop"),
+    PLAYSTATION_4("PlayStation 4", "ps4"),
+    PLAYSTATION_5("PlayStation 5", "ps5"),
+    XBOX("Xbox", "xbox"),
+    SAMSUNG("Samsung", "samsung"),
+    ANDROID("Android", "android"),
+    IOS("iOS", "ios"),
+    EMBEDDED("Embedded", "embedded"),
+    NONE("None", null);
+
+    companion object {
+        fun fromWireValue(value: String?): PresencePlatform? =
+            entries.firstOrNull { it.wireValue != null && it.wireValue == value }
+    }
+}
+
 data class PresenceAsset(
     val image: String,
     val tooltip: String? = null,
@@ -42,6 +70,8 @@ data class PresenceActivity(
     val sourceId: String = "manual",
     val priority: Int = 0,
     val expiresAtEpochMillis: Long = 0L,
+    val timestampDisplayMode: PresenceTimestampDisplayMode = PresenceTimestampDisplayMode.ELAPSED,
+    val platform: PresencePlatform? = null,
 ) {
     fun validate(): List<String> = buildList {
         if (name.isBlank() || name.length > 128) add("name must contain 1–128 characters")

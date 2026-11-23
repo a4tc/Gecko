@@ -18,4 +18,6 @@ data class PresenceUpdate(
     val buttons: List<PresenceButton> = emptyList(),
     val streamUrl: String? = null,
     val accountStatus: String? = null,
+    val timestampDisplayMode: PresenceTimestampDisplayMode = PresenceTimestampDisplayMode.ELAPSED,
+    val platform: PresencePlatform? = null,
 )
