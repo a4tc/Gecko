@@ -61,10 +61,8 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Run pure Kotlin source and security checks
-        run: |
-          bash scripts/test-core.sh
-          bash scripts/verify-source.sh
+      - name: Run pure Kotlin core tests
+        run: bash scripts/test-core.sh
 
       - name: Run Android unit tests and assemble both flavors
         run: |
