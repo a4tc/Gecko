@@ -17,6 +17,8 @@ fun main() {
     check(ArtworkMediaPolicy.hasValidDimensions(8192, 4882))
     check(!ArtworkMediaPolicy.hasValidDimensions(8192, 8192))
     check(!ArtworkMediaPolicy.hasValidDimensions(0, 10))
+    check(ArtworkMediaPolicy.MAX_FILE_BYTES == ArtworkMediaPolicy.MAX_DISCORD_UPLOAD_BYTES)
+    check(ArtworkMediaPolicy.MAX_FILE_BYTES == 25_000_000)
     check(ArtworkMediaPolicy.isValidStoredFileName("01234567-89ab-cdef-0123-456789abcdef", "01234567-89ab-cdef-0123-456789abcdef.png"))
     check(!ArtworkMediaPolicy.isValidStoredFileName("../../etc/passwd", "../../etc/passwd.png"))
     check(ArtworkMediaPolicy.isValidStoredFileName("01234567-89ab-cdef-0123-456789abcdef", "01234567-89ab-cdef-0123-456789abcdef.gif"))

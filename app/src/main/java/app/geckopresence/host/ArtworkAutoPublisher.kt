@@ -19,15 +19,15 @@ import java.util.concurrent.Executors
 
 /**
  * Resolves app/media/gallery artwork into a Discord media-proxy reference ("mp:...") without any
- * third-party host. Images go to the user's own private webhook, then are registered with Discord's
- * external-assets endpoint. Everything runs on one background thread and never blocks presence tracking.
+ * third-party host. Images go to the user's own private webhook; the validated signed CDN attachment
+ * URL is converted to an `mp:` media-proxy reference. Processing never blocks presence tracking.
  */
 object ArtworkAutoPublisher {
     const val KEY_AUTO_ARTWORK = "artwork_auto_discord_v1"
     private const val PREFS_SETTINGS = "gpb_settings"
     private const val PREFS_CACHE = "gpb_artwork_discord_cache_v2"
     private const val LEGACY_PREFS_CACHE = "gpb_artwork_auto_cache"
-    private const val CACHE_PREFIX = "auto:"
+    private const val CACHE_PREFIX = "auto:v2:"
     private const val MAX_CACHE_ENTRIES = 200
     private const val MAX_DECODE_EDGE = 1_024
 
@@ -36,9 +36,9 @@ object ArtworkAutoPublisher {
         Thread(task, "gecko-artwork-auto-publisher").apply { isDaemon = true }
     }
 
-    /** Automatic artwork is ON by default and only active once a webhook has been saved. */
+    /** Automatic artwork is OFF by default and requires an explicit user opt-in plus a saved webhook. */
     fun isEnabled(context: Context): Boolean =
-        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_ARTWORK, true) &&
+        context.getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_ARTWORK, false) &&
             isConfigured(context)
 
     fun isConfigured(context: Context): Boolean = loadWebhook(context) != null
@@ -140,7 +140,7 @@ object ArtworkAutoPublisher {
             ?: return null to "Save a Discord webhook in Settings before artwork can be published"
         val hash = ArtworkMediaPolicy.sha256(bytes)
         val now = System.currentTimeMillis()
-        val cached = readCache(context, hash)
+        val cached = readCache(context, hash, webhook)
         if (cached != null && DiscordArtworkPolicy.isFresh(cached.createdAt, now)) return cached.reference to null
 
         return when (val result = DiscordArtworkUploader.uploadAndReference(webhook, bytes, hash)) {
@@ -164,10 +164,13 @@ object ArtworkAutoPublisher {
 
     private data class CacheEntry(val reference: String, val messageId: String, val createdAt: Long)
 
-    private fun readCache(context: Context, hash: String): CacheEntry? {
+    private fun cachePrefix(webhook: String): String =
+        CACHE_PREFIX + ArtworkMediaPolicy.sha256(webhook.toByteArray(Charsets.UTF_8)) + ":"
+
+    private fun readCache(context: Context, hash: String, webhook: String): CacheEntry? {
         if (!Regex("^[a-f0-9]{64}$").matches(hash)) return null
         val prefs = cachePrefs(context)
-        val key = CACHE_PREFIX + hash
+        val key = cachePrefix(webhook) + hash
         val raw = prefs.getString(key, null) ?: return null
         val json = runCatching { JSONObject(raw) }.getOrNull()
         val reference = json?.optString("mp").orEmpty()
@@ -192,8 +195,9 @@ object ArtworkAutoPublisher {
     ): Boolean {
         if (!Regex("^[a-f0-9]{64}$").matches(hash)) return false
         val prefs = cachePrefs(context)
+        val prefix = cachePrefix(webhook)
         val value = JSONObject().put("mp", reference).put("messageId", messageId).put("createdAt", now).toString()
-        if (!prefs.edit().putString(CACHE_PREFIX + hash, value).commit()) return false
+        if (!prefs.edit().putString(prefix + hash, value).commit()) return false
 
         val entries = prefs.all.entries.asSequence()
             .filter { it.key.startsWith(CACHE_PREFIX) }
@@ -208,7 +212,9 @@ object ArtworkAutoPublisher {
             val editor = prefs.edit()
             evicted.forEach { (staleKey, _, staleMessage) ->
                 editor.remove(staleKey)
-                if (staleMessage.isNotBlank()) DiscordArtworkUploader.deleteWebhookMessage(webhook, staleMessage)
+                if (staleKey.startsWith(prefix) && staleMessage.isNotBlank()) {
+                    DiscordArtworkUploader.deleteWebhookMessage(webhook, staleMessage)
+                }
             }
             editor.apply()
         }

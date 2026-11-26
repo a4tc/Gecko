@@ -50,7 +50,7 @@ The same `PresenceActivityDisplayFormatter` is used for the type-specific headli
 
 ## Artwork policy
 
-Gallery imports remain private by default. Automatic public hosting is a separate standing opt-in with an explicit disclosure that Imgur uploads become public to anyone with their URL. It requires the user's Imgur Client-ID. Gecko uses the fixed Imgur anonymous upload endpoint only; it does not call Discord-internal image-upload endpoints or Kizzy's private relay. Reuse a previously uploaded URL for a SHA-256 duplicate. Detected artwork uses a separate bounded 200-entry URL cache and temporary private staging files, so routine media changes do not consume the user’s 40-item Gallery quota.
+Gallery imports remain private in app storage. When a user selects Gallery artwork for presence, Gecko uploads it through the configured Discord webhook, validates the signed Discord CDN attachment URL, and converts it to an `mp:` reference. Automatic media/app artwork is OFF by default and requires an explicit opt-in and a saved webhook. The 200-entry content-addressed cache is scoped by a one-way hash of webhook identity; no raw webhook secret is stored with cache entries. The upload limit is 25,000,000 bytes and the existing 40-item/64 MiB Gallery bounds remain in force.
 
 ## Native Android constraints
 

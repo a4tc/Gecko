@@ -23,4 +23,4 @@ Gecko now uses active-session change notifications and controller callbacks as t
 
 ## Discord artwork boundary
 
-The code uses a public HTTPS Imgur URL for uploaded artwork and sends that external URL as the activity asset. It deliberately does not use `mp:attachments/...` internal references or Kizzy's private proxy/API. The standing public-upload setting is off by default, requires a user-provided Imgur Client-ID, and has an explicit public-visibility disclosure.
+The current code uploads artwork to the user's own Discord webhook, validates the returned signed Discord CDN attachment URL, and converts it into an `mp:` media-proxy reference. It does not use Imgur, Cloudflare/R2, a self-hosted endpoint, or Kizzy's private relay/API. Automatic media and application artwork is OFF by default and requires an explicit Gecko setting plus a configured webhook. The normal-user Gateway session used by Gecko remains an undocumented compatibility path, not an official Discord API.

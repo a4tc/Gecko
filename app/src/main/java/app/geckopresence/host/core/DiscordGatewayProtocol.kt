@@ -60,24 +60,32 @@ object DiscordGatewayProtocol {
         ),
     )
 
-    fun presenceUpdate(activity: PresenceActivity?, applicationId: Long, status: String = "online", nowMillis: Long = System.currentTimeMillis()): GatewayEnvelope {
+    fun presenceUpdate(activity: PresenceActivity?, applicationId: Long, status: String = "online", nowMillis: Long = System.currentTimeMillis()): GatewayEnvelope =
+        presenceUpdateMany(activity?.let { listOf(it) }.orEmpty(), applicationId, status, nowMillis)
+
+    fun presenceUpdateMany(
+        activities: List<PresenceActivity>,
+        applicationId: Long,
+        status: String = "online",
+        nowMillis: Long = System.currentTimeMillis(),
+    ): GatewayEnvelope {
         require(status in ALLOWED_STATUSES) { "Unsupported Discord presence status" }
-        activity?.let { candidate ->
+        require(activities.size <= PresenceSourceArbiter.MAX_ACTIVITY_COUNT) {
+            "At most ${PresenceSourceArbiter.MAX_ACTIVITY_COUNT} activities may be serialized"
+        }
+        activities.forEach { candidate ->
             val errors = candidate.validate()
             require(errors.isEmpty()) { "Invalid presence activity: ${errors.joinToString(", ")}" }
         }
-        val activities = if (activity == null) {
-            emptyList<Map<String, Any?>>()
-        } else {
-            listOf(activity.toGatewayActivity(applicationId))
-        }
+        val wireActivities = activities.map { it.toGatewayActivity(applicationId) }
+        val empty = activities.isEmpty()
         return GatewayEnvelope(
             op = OP_PRESENCE_UPDATE,
             data = linkedMapOf(
-                "since" to if (activity == null) 0L else nowMillis,
-                "activities" to activities,
+                "since" to if (empty) 0L else nowMillis,
+                "activities" to wireActivities,
                 "status" to status,
-                "afk" to (activity == null),
+                "afk" to empty,
             ),
         )
     }

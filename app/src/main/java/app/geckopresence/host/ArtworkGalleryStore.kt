@@ -49,7 +49,7 @@ object ArtworkGalleryStore {
                     val count = input.read(buffer)
                     if (count < 0) break
                     total += count
-                    if (total > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 50 MiB original-file limit.")
+                    if (total > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 25 MB Discord upload limit.")
                     output.write(buffer, 0, count)
                 }
                 output.toByteArray()
@@ -76,7 +76,7 @@ object ArtworkGalleryStore {
             runCatching { candidate.isFile && candidate.canonicalFile.parentFile == canonicalDirectory }.getOrDefault(false)
         }
         if (localFiles.size >= MAX_ITEMS) return ImportResult.Rejected("Gallery is full (maximum $MAX_ITEMS images).")
-        if (bytes.isEmpty() || bytes.size > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 50 MiB original-file limit.")
+        if (bytes.isEmpty() || bytes.size > MAX_FILE_BYTES) return ImportResult.Rejected("Image exceeds the 25 MB Discord upload limit.")
         val detected = ArtworkMediaPolicy.detectImage(bytes)
             ?: return ImportResult.Rejected("Only JPEG, PNG, WebP and GIF images are supported.")
         val width: Int

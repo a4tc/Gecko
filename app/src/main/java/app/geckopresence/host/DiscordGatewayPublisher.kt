@@ -9,6 +9,7 @@ import app.geckopresence.host.core.GatewayCloseCodePolicy
 import app.geckopresence.host.core.GatewayCloseDisposition
 import app.geckopresence.host.core.GatewayInvalidSessionPolicy
 import app.geckopresence.host.core.PresenceActivity
+import app.geckopresence.host.core.PresenceSourceArbiter
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.header
@@ -81,7 +82,7 @@ class DiscordGatewayPublisher(
     private var sessionId: String? = null
     private var resumeGatewayUrl: String? = null
     private var lastSequence: Long? = null
-    private var pendingActivity: PresenceActivity? = null
+    private var pendingActivities: List<PresenceActivity> = emptyList()
     private var pendingStatus: String = "online"
     private var pendingRevision = 0L
     private var lastSentRevision = -1L
@@ -113,13 +114,20 @@ class DiscordGatewayPublisher(
         connectionJob = scope.launch { connectionLoop() }
     }
 
-    fun publish(activity: PresenceActivity?, status: String = "online") {
+    fun publish(activity: PresenceActivity?, status: String = "online") =
+        publishActivities(activity?.let { listOf(it) }.orEmpty(), status)
+
+    fun publishActivities(activities: List<PresenceActivity>, status: String = "online") {
+        require(activities.size <= PresenceSourceArbiter.MAX_ACTIVITY_COUNT) {
+            "At most ${PresenceSourceArbiter.MAX_ACTIVITY_COUNT} activities may be queued"
+        }
+        val snapshot = activities.toList()
         val revision = synchronized(stateLock) {
-            pendingActivity = activity
+            pendingActivities = snapshot
             pendingStatus = status.takeIf { it in ALLOWED_PRESENCE_STATUSES } ?: "online"
             ++pendingRevision
         }
-        onDiagnostic(if (activity == null) "Presence clear queued revision=$revision" else "Presence queued revision=$revision")
+        onDiagnostic(if (snapshot.isEmpty()) "Presence clear queued revision=$revision" else "Presence queued count=${snapshot.size} revision=$revision")
         updateEvents.trySend(Unit)
     }
 
@@ -409,7 +417,7 @@ class DiscordGatewayPublisher(
     private suspend fun flushPendingPresence() {
         if (!isReady || userRequestedDisconnect) return
         val snapshot: PresenceSnapshot = synchronized(stateLock) {
-            PresenceSnapshot(pendingActivity, pendingStatus, pendingRevision)
+            PresenceSnapshot(pendingActivities.toList(), pendingStatus, pendingRevision)
         }
         val alreadySent = synchronized(stateLock) { snapshot.revision <= lastSentRevision }
         if (alreadySent) return
@@ -422,17 +430,58 @@ class DiscordGatewayPublisher(
         if (!isReady || userRequestedDisconnect) return
 
         val latest: PresenceSnapshot = synchronized(stateLock) {
-            PresenceSnapshot(pendingActivity, pendingStatus, pendingRevision)
+            PresenceSnapshot(pendingActivities.toList(), pendingStatus, pendingRevision)
         }
         val alreadySentLatest = synchronized(stateLock) { latest.revision <= lastSentRevision }
         if (alreadySentLatest) return
         val sent = try {
-            sendEnvelope(DiscordGatewayProtocol.presenceUpdate(latest.activity, applicationId, latest.status))
+            sendEnvelope(DiscordGatewayProtocol.presenceUpdateMany(latest.activities, applicationId, latest.status))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: GatewayPayloadTooLargeException) {
-            emitState(STATE_ERROR, "Presence payload exceeds Discord's 4,096-byte limit. Shorten text or remove artwork/buttons.")
-            return
+            if (latest.activities.size > 1) {
+                onDiagnostic("Multi-activity payload exceeded the local size guard; retrying the top-ranked activity only")
+                try {
+                    sendEnvelope(DiscordGatewayProtocol.presenceUpdate(latest.activities.first(), applicationId, latest.status))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: GatewayPayloadTooLargeException) {
+                    emitState(STATE_ERROR, "Presence payload exceeds Discord's 4,096-byte limit. Shorten text or remove artwork/buttons.")
+                    false
+                } catch (exception: IllegalArgumentException) {
+                    emitState(STATE_ERROR, "Top-ranked presence activity failed local validation; review its fields.")
+                    false
+                } catch (exception: Exception) {
+                    onDiagnostic("Single-activity fallback write failed (${exception.javaClass.simpleName})")
+                    socket?.let { requestReconnect(it, "Gateway fallback send failed") }
+                    false
+                }
+            } else {
+                emitState(STATE_ERROR, "Presence payload exceeds Discord's 4,096-byte limit. Shorten text or remove artwork/buttons.")
+                false
+            }
+        } catch (exception: IllegalArgumentException) {
+            if (latest.activities.size > 1) {
+                onDiagnostic("Multi-activity validation failed (${exception.javaClass.simpleName}); retrying the top-ranked activity only")
+                try {
+                    sendEnvelope(DiscordGatewayProtocol.presenceUpdate(latest.activities.first(), applicationId, latest.status))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: GatewayPayloadTooLargeException) {
+                    emitState(STATE_ERROR, "Presence payload exceeds Discord's 4,096-byte limit. Shorten text or remove artwork/buttons.")
+                    false
+                } catch (fallbackException: IllegalArgumentException) {
+                    emitState(STATE_ERROR, "Top-ranked presence activity failed local validation; review its fields.")
+                    false
+                } catch (fallbackException: Exception) {
+                    onDiagnostic("Single-activity validation fallback failed (${fallbackException.javaClass.simpleName})")
+                    socket?.let { requestReconnect(it, "Gateway fallback send failed") }
+                    false
+                }
+            } else {
+                emitState(STATE_ERROR, "Presence activity failed local validation; review its fields.")
+                false
+            }
         } catch (exception: Exception) {
             onDiagnostic("Presence opcode-3 write failed (${exception.javaClass.simpleName})")
             socket?.let { requestReconnect(it, "Gateway presence send failed") }
@@ -535,7 +584,7 @@ class DiscordGatewayPublisher(
     private class GatewayPayloadTooLargeException : IllegalArgumentException()
 
     private data class PresenceSnapshot(
-        val activity: PresenceActivity?,
+        val activities: List<PresenceActivity>,
         val status: String,
         val revision: Long,
     )

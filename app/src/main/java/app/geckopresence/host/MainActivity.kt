@@ -278,7 +278,7 @@ class MainActivity : Activity() {
             "SETTINGS" to PAGE_SETTINGS,
         )
         val selectedDestination = when (activePage) {
-            PAGE_AUTOMATION, PAGE_DEVELOPER -> PAGE_SETTINGS
+            PAGE_AUTOMATION, PAGE_DEVELOPER, PAGE_EXPERIMENTAL, PAGE_MULTI_ACTIVITY -> PAGE_SETTINGS
             else -> activePage
         }
         destinations.forEach { (label, destination) ->
@@ -324,6 +324,8 @@ class MainActivity : Activity() {
             PAGE_AUTOMATION -> buildAutomation()
             PAGE_LIBRARY -> buildLibrary()
             PAGE_SETTINGS -> buildSettings()
+            PAGE_EXPERIMENTAL -> buildExperimentalHub()
+            PAGE_MULTI_ACTIVITY -> buildMultiActivityDetail()
             PAGE_DEVELOPER -> buildDeveloper()
         }
     }
@@ -1514,7 +1516,7 @@ class MainActivity : Activity() {
                 }.show()
         }, marginTop(8))
 
-        addSwitch(card, "Automatic artwork for media covers, app icons and Studio images", ArtworkAutoPublisher.KEY_AUTO_ARTWORK, true)
+        addSwitch(card, "Automatic artwork for media covers, app icons and Studio images", ArtworkAutoPublisher.KEY_AUTO_ARTWORK, false)
         pageContent.addView(card, marginTop(12))
     }
 
@@ -1601,7 +1603,7 @@ class MainActivity : Activity() {
             if (bytes == null || format == null) {
                 runOnUiThread {
                     finishArtworkImport(ArtworkGalleryStore.ImportResult.Rejected(
-                        "Could not read the image. Supported formats are JPEG, PNG, WebP and GIF, up to 50 MiB.",
+                        "Could not read the image. Supported formats are JPEG, PNG, WebP and GIF, up to 25 MB.",
                     ))
                 }
                 return@Thread
@@ -1880,8 +1882,51 @@ class MainActivity : Activity() {
         if (BuildConfig.AUTOMATION_SOURCES_ENABLED) {
             tools.addView(actionButton("SOURCE AUTOMATION & PRIORITIES", false) { showPage(PAGE_AUTOMATION) }, marginTop(10))
         }
+        tools.addView(actionButton("EXPERIMENTAL FEATURES", false) { showPage(PAGE_EXPERIMENTAL) }, marginTop(8))
         tools.addView(actionButton("DEVELOPER CONSOLE", false) { showPage(PAGE_DEVELOPER) }, marginTop(8))
         pageContent.addView(tools, marginTop(12))
+    }
+
+
+    private fun buildExperimentalHub() {
+        pageContent.addView(sectionTitle("EXPERIMENTAL FEATURES", "Optional capabilities · not officially supported"))
+        val intro = card()
+        intro.addView(text("EXPERIMENTS ARE OFF BY DEFAULT", 11, COLOR_ACCENT, true, mono = true))
+        intro.addView(text("Each experiment has an independent control. Review its compatibility and account-risk notes before enabling it. Turning an experiment off restores Gecko's normal behavior.", 12, COLOR_MUTED), marginTop(8))
+        pageContent.addView(intro)
+
+        val enabled = settings.getBoolean(PresenceEngineService.KEY_MULTI_ACTIVITY_ENABLED, false)
+        val feature = card()
+        feature.addView(text("MULTI-ACTIVITY MODE", 12, COLOR_TEXT, true, mono = true))
+        feature.addView(text("Represent up to three distinct eligible sources in one presence update instead of publishing only the single winning source.", 12, COLOR_MUTED), marginTop(8))
+        feature.addView(text(if (enabled) "STATUS / ON · EXPERIMENTAL" else "STATUS / OFF · DEFAULT", 10, if (enabled) COLOR_ACCENT else COLOR_MUTED, true, mono = true), marginTop(8))
+        feature.addView(actionButton("REVIEW EXPERIMENT", false) { showPage(PAGE_MULTI_ACTIVITY) }, marginTop(10))
+        pageContent.addView(feature, marginTop(12))
+    }
+
+    private fun buildMultiActivityDetail() {
+        pageContent.addView(sectionTitle("MULTI-ACTIVITY MODE", "Experimental presence selection"))
+        val warning = card()
+        warning.addView(text("UNSUPPORTED DISCORD USER-SESSION AUTOMATION", 11, COLOR_MAGENTA, true, mono = true))
+        warning.addView(text("This experiment uses Gecko's undocumented normal-user Gateway session flow. Discord does not officially support automated multi-activity publishing for normal user accounts. Using automated user accounts may violate Discord's rules and can expose the account to enforcement. Discord clients may ignore, reject or display only part of the submitted list. Enabling this is at your own risk.", 12, COLOR_MUTED), marginTop(8))
+        pageContent.addView(warning)
+
+        val behavior = card()
+        behavior.addView(text("WHEN ENABLED", 11, COLOR_ACCENT, true, mono = true))
+        behavior.addView(text("Gecko selects eligible, unexpired candidates deterministically by priority, start time, source type and source key; removes equivalent activities; and caps the list at three. Manual and automatic sources may coexist. The highest-ranked candidate controls account status.", 12, COLOR_MUTED), marginTop(8))
+        behavior.addView(text("WHEN DISABLED", 11, COLOR_ACCENT, true, mono = true), marginTop(12))
+        behavior.addView(text("Gecko returns to the existing single-winning-activity behavior. The setting is stored independently and is OFF on first install.", 12, COLOR_MUTED), marginTop(8))
+        pageContent.addView(behavior, marginTop(12))
+
+        val controls = card()
+        controls.addView(text("EXPERIMENT CONTROL", 11, COLOR_ACCENT, true, mono = true))
+        addSwitch(controls, "Enable Multi-Activity Mode", PresenceEngineService.KEY_MULTI_ACTIVITY_ENABLED, false) {
+            sendBroadcast(
+                Intent(PresenceEngineService.ACTION_REFRESH_PRESENCE).setPackage(packageName),
+                PresenceEngineService.INTERNAL_BROADCAST_PERMISSION,
+            )
+        }
+        pageContent.addView(controls, marginTop(12))
     }
 
 
@@ -2405,6 +2450,8 @@ class MainActivity : Activity() {
         private const val PAGE_LIBRARY = "Library"
         private const val PAGE_SETTINGS = "Settings"
         private const val PAGE_DEVELOPER = "Developer"
+        private const val PAGE_EXPERIMENTAL = "Experimental"
+        private const val PAGE_MULTI_ACTIVITY = "Multi-Activity"
         private const val PREFS_SETTINGS = "gpb_settings"
         private const val PREFS_RUNTIME = "gpb_runtime"
         private const val KEY_STUDIO_DRAFT_NAME = "studio_draft_name"

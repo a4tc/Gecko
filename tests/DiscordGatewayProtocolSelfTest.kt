@@ -57,6 +57,19 @@ object DiscordGatewayProtocolSelfTest {
         check(data["status"] == "online")
         check(data["afk"] == false)
         val activities = data["activities"] as? List<*> ?: error("activities missing")
+
+        val multiUpdate = DiscordGatewayProtocol.presenceUpdateMany(
+            listOf(PresenceActivity(name = "Firefox"), PresenceActivity(name = "Spotify", type = PresenceActivityType.LISTENING)),
+            1569772369344602173L,
+            nowMillis = 1_700_000_000_000L,
+        )
+        val multiWire = (multiUpdate.data as Map<*, *>)["activities"] as List<*>
+        check(multiWire.size == 2)
+        check((multiWire[0] as Map<*, *>)["name"] == "Firefox")
+        check((multiWire[1] as Map<*, *>)["type"] == PresenceActivityType.LISTENING.wireValue)
+        check(runCatching {
+            DiscordGatewayProtocol.presenceUpdateMany(List(4) { PresenceActivity(name = "Activity $it") }, 1569772369344602173L)
+        }.isFailure)
         val wireActivity = activities.single() as Map<*, *>
         check(wireActivity["name"] == "Firefox")
         check(wireActivity["type"] == 3)

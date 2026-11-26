@@ -5,8 +5,8 @@ import java.security.MessageDigest
 
 /** Pure validation rules for local artwork and externally hosted image references. */
 object ArtworkMediaPolicy {
-    const val MAX_FILE_BYTES = 50 * 1024 * 1024
     const val MAX_DISCORD_UPLOAD_BYTES = 25_000_000
+    const val MAX_FILE_BYTES = MAX_DISCORD_UPLOAD_BYTES
     const val MAX_STATIC_BYTES = 8 * 1024 * 1024
     const val MAX_TOTAL_BYTES = 64L * 1024L * 1024L
     const val MAX_ITEMS = 40

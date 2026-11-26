@@ -132,5 +132,17 @@ fun main() {
     check(PresenceSourceArbiter.winner(mapOf("web" to expiring), 999L) != null)
     check(PresenceSourceArbiter.winner(mapOf("web" to expiring), 1_000L) == null)
     check(PresenceSourceArbiter.winner(mapOf("web" to browserCandidate), 99_999L) != null)
+
+    val multiCandidates = mapOf(
+        "duplicate-high" to browserCandidate.copy(source = "same-a", sourceType = "website", priority = 100),
+        "duplicate-low" to browserCandidate.copy(source = "same-b", sourceType = "android-app", priority = 90),
+        "tie-web" to browserCandidate.copy(source = "tie-web", sourceType = "website", name = "Web activity", priority = 80),
+        "tie-app" to browserCandidate.copy(source = "tie-app", sourceType = "android-app", name = "App activity", priority = 80),
+        "last" to browserCandidate.copy(source = "last", sourceType = "media-session", name = "Last activity", priority = 70),
+    )
+    val selectedActivities = PresenceSourceArbiter.select(multiCandidates, 99_999L)
+    check(selectedActivities.size == 3)
+    check(selectedActivities.map { it.source } == listOf("same-a", "tie-app", "tie-web"))
+    check(PresenceSourceArbiter.select(multiCandidates, 99_999L, maxActivities = 2).size == 2)
     println("PresenceRulesSelfTest: core policy checks passed")
 }

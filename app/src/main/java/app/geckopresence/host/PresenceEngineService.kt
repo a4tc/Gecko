@@ -30,6 +30,12 @@ import app.geckopresence.host.core.RpcStartupPolicy
 class PresenceEngineService : Service() {
     private val presenceCandidates = linkedMapOf<String, PresenceUpdate>()
     private val presenceLock = Any()
+    private val artworkRequestRevisions = mutableMapOf<String, Long>()
+    private var artworkRevisionCounter = 0L
+
+    private data class PresenceSelection(val candidates: List<PresenceUpdate>) {
+        val winner: PresenceUpdate? get() = candidates.firstOrNull()
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile private var latestPresence: PresenceUpdate? = null
@@ -56,6 +62,7 @@ class PresenceEngineService : Service() {
                         }
                     }
                     ACTION_REFRESH_MEDIA -> updateMediaTracking()
+                    ACTION_REFRESH_PRESENCE -> applyPresenceSelection(currentSelection())
                 }
             } catch (exception: Exception) {
                 Log.e(TAG, "Source broadcast failed (${exception.javaClass.simpleName}): ${app.geckopresence.host.core.SensitiveDataRedactor.redact(exception.message.orEmpty())}")
@@ -78,7 +85,7 @@ class PresenceEngineService : Service() {
                 }
                 expired
             }
-            if (changed) applyPresenceWinner(currentWinner())
+            if (changed) applyPresenceSelection(currentSelection())
             if (engineState == STATE_RUNNING) mainHandler.postDelayed(this, EXPIRY_SWEEP_INTERVAL_MS)
         }
     }
@@ -245,6 +252,7 @@ class PresenceEngineService : Service() {
             addAction(ACTION_BROWSER_PRESENCE)
             addAction(ACTION_BROWSER_CLEAR)
             addAction(ACTION_REFRESH_MEDIA)
+            addAction(ACTION_REFRESH_PRESENCE)
         }
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(
@@ -372,9 +380,11 @@ class PresenceEngineService : Service() {
         handleIncomingPresence(update)
         if (update.largeImage != null) return
         if (!ArtworkAutoPublisher.isEnabled(this)) return
+        val artworkRevision = currentArtworkRequestRevision(update.source)
 
         ArtworkAutoPublisher.resolveApplicationIcon(this, packageName.orEmpty(), update.name) { asset, artworkStatus ->
             mainHandler.post {
+                if (!isArtworkRequestCurrent(update.source, artworkRevision)) return@post
                 if (engineState != STATE_RUNNING || asset == null) {
                     artworkStatus?.let(::recordEvent)
                     return@post
@@ -452,6 +462,7 @@ class PresenceEngineService : Service() {
     }
 
     private fun handleIncomingPresence(update: PresenceUpdate) {
+        val artworkRevision = nextArtworkRequestRevision(update.source)
         val localLarge = update.largeImage?.image?.let(DiscordArtworkPolicy::localId)
         val localSmall = update.smallImage?.image?.let(DiscordArtworkPolicy::localId)
         if (localLarge == null && localSmall == null) {
@@ -471,6 +482,7 @@ class PresenceEngineService : Service() {
             if (galleryId == null) return
             ArtworkAutoPublisher.resolveGalleryReference(this, galleryId) { reference, status ->
                 mainHandler.post {
+                    if (!isArtworkRequestCurrent(update.source, artworkRevision)) return@post
                     if (engineState != STATE_RUNNING || reference == null) {
                         status?.let(::recordEvent)
                         return@post
@@ -489,31 +501,70 @@ class PresenceEngineService : Service() {
     }
 
     private fun clearSourceType(sourceType: String) {
+        synchronized(presenceLock) {
+            presenceCandidates.values.filter { it.sourceType == sourceType }.forEach { candidate ->
+                artworkRequestRevisions[candidate.source] = (artworkRequestRevisions[candidate.source] ?: 0L) + 1L
+            }
+        }
         updatePresenceCandidates { PresenceSourceArbiter.removeSourceType(it, sourceType) }
     }
 
+    private fun nextArtworkRequestRevision(source: String): Long = synchronized(presenceLock) {
+        artworkRevisionCounter += 1L
+        artworkRequestRevisions[source] = artworkRevisionCounter
+        artworkRevisionCounter
+    }
+
+    private fun currentArtworkRequestRevision(source: String): Long = synchronized(presenceLock) {
+        artworkRequestRevisions[source] ?: 0L
+    }
+
+    private fun isArtworkRequestCurrent(source: String, revision: Long): Boolean = synchronized(presenceLock) {
+        artworkRequestRevisions[source] == revision
+    }
+
     private fun updatePresenceCandidates(transform: (Map<String, PresenceUpdate>) -> Map<String, PresenceUpdate>) {
-        val winner = synchronized(presenceLock) {
+        val selection = synchronized(presenceLock) {
             val updated = transform(PresenceSourceArbiter.active(presenceCandidates))
             presenceCandidates.clear()
             presenceCandidates.putAll(updated)
-            PresenceSourceArbiter.winner(presenceCandidates)
+            artworkRequestRevisions.keys.retainAll(presenceCandidates.keys)
+            currentSelectionLocked()
         }
-        applyPresenceWinner(winner)
+        applyPresenceSelection(selection)
     }
 
-    private fun currentWinner(): PresenceUpdate? = synchronized(presenceLock) {
-        PresenceSourceArbiter.winner(presenceCandidates)
+    private fun currentSelection(): PresenceSelection = synchronized(presenceLock) {
+        currentSelectionLocked()
     }
 
-    private fun applyPresenceWinner(winner: PresenceUpdate?) {
+    /** Caller holds presenceLock: winner, multi-list and account status share one candidate snapshot. */
+    private fun currentSelectionLocked(): PresenceSelection {
+        val active = PresenceSourceArbiter.active(presenceCandidates)
+        if (active.size != presenceCandidates.size) {
+            presenceCandidates.clear()
+            presenceCandidates.putAll(active)
+            artworkRequestRevisions.keys.retainAll(presenceCandidates.keys)
+        }
+        val experimental = getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE)
+            .getBoolean(KEY_MULTI_ACTIVITY_ENABLED, false)
+        val selected = if (experimental) {
+            PresenceSourceArbiter.select(active)
+        } else {
+            listOfNotNull(PresenceSourceArbiter.winner(active))
+        }
+        return PresenceSelection(selected)
+    }
+
+    private fun applyPresenceSelection(selection: PresenceSelection) {
+        val winner = selection.winner
         latestPresence = winner
-        recordEvent("Presence selected: source=${winner?.sourceType ?: "none"}")
+        recordEvent("Presence selected: source=${winner?.sourceType ?: "none"} count=${selection.candidates.size}")
         val globalStatus = getSharedPreferences(PREFS_SETTINGS, MODE_PRIVATE)
             .getString(KEY_PRESENCE_STATUS, "online")
             .orEmpty()
         val selectedStatus = winner?.accountStatus ?: globalStatus
-        gatewayPublisher?.publish(winner?.let(PresenceActivityMapper::fromUpdate), selectedStatus)
+        gatewayPublisher?.publishActivities(selection.candidates.map(PresenceActivityMapper::fromUpdate), selectedStatus)
         publishStatus()
     }
 
@@ -608,6 +659,7 @@ class PresenceEngineService : Service() {
         gatewayPublisher = null
         synchronized(presenceLock) {
             presenceCandidates.clear()
+            artworkRequestRevisions.clear()
             latestPresence = null
         }
         getSharedPreferences(PREFS_RUNTIME, MODE_PRIVATE).edit()
@@ -632,6 +684,7 @@ class PresenceEngineService : Service() {
         const val ACTION_UPDATE_APP_TRACKING = "app.geckopresence.host.action.UPDATE_APP_TRACKING"
         const val ACTION_UPDATE_MEDIA_TRACKING = "app.geckopresence.host.action.UPDATE_MEDIA_TRACKING"
         const val ACTION_REFRESH_MEDIA = "app.geckopresence.host.action.REFRESH_MEDIA"
+        const val ACTION_REFRESH_PRESENCE = "app.geckopresence.host.action.REFRESH_PRESENCE"
         const val ACTION_APPLY_MANUAL = "app.geckopresence.host.action.APPLY_MANUAL"
         const val ACTION_CLEAR_MANUAL = "app.geckopresence.host.action.CLEAR_MANUAL"
         const val ACTION_BROWSER_PRESENCE = "app.geckopresence.host.action.BROWSER_PRESENCE"
@@ -671,6 +724,7 @@ class PresenceEngineService : Service() {
         const val KEY_TRACK_MEDIA_SESSIONS = "track_media_sessions"
         const val KEY_AUTO_SOURCES_ENABLED = "auto_sources_enabled"
         const val KEY_PRESENCE_STATUS = "presence_status"
+        const val KEY_MULTI_ACTIVITY_ENABLED = "experimental_multi_activity_enabled"
         const val KEY_MANUAL_ACTIVITY_TYPE = "manual_presence_activity_type"
         const val KEY_MANUAL_STREAM_URL = "manual_presence_stream_url"
         const val KEY_MANUAL_LARGE_IMAGE = "manual_presence_large_image"

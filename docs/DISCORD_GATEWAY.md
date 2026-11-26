@@ -46,3 +46,9 @@ Artwork supports application asset keys, public HTTPS image URLs, and Gecko gall
 ## Source tests
 
 `bash scripts/test-core.sh` tests protocol envelope structure and transport-neutral mapping without credentials or a network connection. These tests do not emulate a real Discord Gateway session and do not establish that Discord will accept the undocumented user-session Identify payload.
+
+## Experimental multi-activity behavior
+
+Multi-Activity Mode is an opt-in experiment in Settings → Experimental and is OFF by default. OFF retains the pre-existing single-winner publication contract. ON selects unexpired candidates using priority descending, start timestamp descending, source type ascending and source key ascending; equivalent mapped activities are deduplicated and the list is capped at three. Manual and automatic sources may coexist, while the top-ranked candidate controls account-level status.
+
+The protocol serializes the selected list into the Gateway `activities` array and preserves update coalescing, revision tracking, rate limiting, reconnect replay, and the 4,096-byte UTF-8 payload guard. If the multi-activity payload exceeds the local guard, Gecko retries the top-ranked activity only. This fallback demonstrates only a local socket write attempt, not Discord server acceptance or client rendering. Normal-user Gateway automation is undocumented/unsupported and carries account-policy risk; the in-app warning must be reviewed before opt-in.

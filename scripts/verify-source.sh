@@ -161,7 +161,7 @@ require("Executors.newSingleThreadExecutor" in main_activity and "artworkPreview
 require("linkImportedArtwork" in main_activity and "confirmArtworkUpload" not in main_activity and "Upload artwork publicly?" not in main_activity, "picked artwork is linked and hosted automatically without a confirmation or paste step")
 auto_artwork = (app / "src/main/java/app/geckopresence/host/ArtworkAutoPublisher.kt").read_text()
 media_tracker = (app / "src/main/java/app/geckopresence/host/MediaSessionPresenceTracker.kt").read_text()
-require("KEY_AUTO_ARTWORK" in auto_artwork and "getBoolean(KEY_AUTO_ARTWORK, true)" in auto_artwork and "isConfigured(context)" in auto_artwork, "automatic artwork is on by default and only active once a webhook is saved")
+require("KEY_AUTO_ARTWORK" in auto_artwork and "getBoolean(KEY_AUTO_ARTWORK, false)" in auto_artwork and "isConfigured(context)" in auto_artwork, "automatic artwork is off by default and requires a saved webhook")
 require("addOnActiveSessionsChangedListener" in media_tracker and "OnActiveSessionsChangedListener" in media_tracker, "media detector subscribes to active-session changes")
 require("registerCallback(controllerCallback, handler)" in media_tracker and "onMetadataChanged" in media_tracker and "onPlaybackStateChanged" in media_tracker, "media detector listens for metadata and playback changes")
 require("MISSING_SESSION_GRACE_MS" in media_tracker and "POLL_INTERVAL_MS = 10_000L" in media_tracker, "media detector tolerates transient empty session lists and keeps a polling fallback")

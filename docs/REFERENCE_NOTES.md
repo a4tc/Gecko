@@ -9,11 +9,10 @@ Current 0.6.6+ implementation references:
 
 Gecko 0.6.5 removed the Discord Social SDK AAR, JNI bridge, CMake project, and native Discord SDK bootstrap. The transport is Kotlin/Ktor only.
 
-## Artwork hosting references (0.6.6)
+## Current artwork delivery boundary
 
-- Cloudflare Workers documentation defines the HTTPS Worker request boundary; Cloudflare R2 bindings store the object bytes. The Worker uses a user's own `GECKO_UPLOAD_TOKEN` secret and their own bucket binding.
-- R2 public delivery uses a user-configured custom domain. The URL is public to anyone who obtains it so Discord can retrieve the image; the Worker itself does not expose an object-list/read/delete API.
-- Gecko's Android UI accepts the user's Worker endpoint, public asset origin and upload token. It stores only non-secret URLs in normal preferences and stores the token as AES-GCM ciphertext using a dedicated Android Keystore key and AAD domain.
-- `ArtworkUploadPolicy` validates HTTPS Worker endpoints, public DNS hosts, asset URL paths and content-addressed hashes. `CloudflareArtworkUploader` enforces size, MIME/signature, response-size, response-hash and configured-origin checks and disables redirects.
-- `GET /v1/verify` allows the app to authenticate the configured Worker without returning the secret. `POST /v1/upload` receives raw image bytes and stores the SHA-256-addressed object.
-- Existing Imgur URL records remain readable for migration/backwards compatibility; new Android Gallery, Studio and automatic artwork uploads use the configured Cloudflare Worker.
+- Gecko uploads Gallery, Studio and automatic artwork bytes to the user's own Discord webhook. The webhook URL remains in the dedicated encrypted credential vault; it is not stored in cache metadata or logs.
+- The upload response supplies a signed Discord CDN attachment URL. Gecko converts that URL into the `mp:` media-proxy reference used by the presence activity. No Cloudflare Worker, R2 bucket, Imgur host, self-hosted image endpoint, or third-party image host is part of the current delivery path.
+- The local automatic-artwork cache is keyed by the content SHA-256 plus a one-way hash of the normalized webhook identity, so a cache hit or eviction cannot reuse or delete an attachment belonging to a different webhook.
+- Automatic artwork is OFF by default and requires an explicit in-app opt-in plus a saved webhook. Manually selected Gallery artwork is resolved when the user applies it to an activity.
+- Gallery image bytes are capped at the 25,000,000-byte Discord upload ceiling; the total Gallery remains bounded by its existing item and aggregate-storage limits.

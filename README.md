@@ -58,3 +58,7 @@ The project uses JDK 17, Gradle 8.10.2, Android SDK Platform 35, AGP 8.8.2, and 
 - The webhook URL is stored locally as encrypted ciphertext. Registration uses your existing Discord credential and is sent only to discord.com.
 - The publisher has inbound frame bounds and a HELLO timeout. Real Discord Gateway acceptance and rich-presence rendering remain device-test requirements.
 - Rooted-device and runtime-instrumentation resistance is not guaranteed by Android Keystore encryption alone.
+
+## Experimental features
+
+Gecko includes a Settings → Experimental hub. Multi-Activity Mode is an opt-in experiment, OFF by default. When enabled, Gecko selects and serializes up to three distinct eligible source activities in one Gateway presence update; when disabled, the existing single-winner behavior remains. The feature uses an undocumented normal-user session flow, is unsupported by Discord, may violate Discord's rules on automated user accounts, and does not guarantee that clients will render every submitted activity. Review the in-app warning before enabling it.

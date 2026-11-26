@@ -25,4 +25,31 @@ object PresenceSourceArbiter {
     ): PresenceUpdate? = active(current, nowEpochMillis).values.maxWithOrNull(
         compareBy<PresenceUpdate> { it.priority }.thenBy { it.startTimestampSeconds },
     )
+
+    /** Deterministic experimental selection; existing one-candidate-per-source semantics remain. */
+    fun select(
+        current: Map<String, PresenceUpdate>,
+        nowEpochMillis: Long = System.currentTimeMillis(),
+        maxActivities: Int = MAX_ACTIVITY_COUNT,
+    ): List<PresenceUpdate> {
+        val limit = maxActivities.coerceIn(0, MAX_ACTIVITY_COUNT)
+        if (limit == 0) return emptyList()
+        val ordered = active(current, nowEpochMillis).values.sortedWith(
+            compareByDescending<PresenceUpdate> { it.priority }
+                .thenByDescending { it.startTimestampSeconds }
+                .thenBy { it.sourceType }
+                .thenBy { it.source },
+        )
+        val seen = HashSet<PresenceActivity>()
+        return ordered.filter { update ->
+            val identity = PresenceActivityMapper.fromUpdate(update).copy(
+                sourceId = "",
+                priority = 0,
+                expiresAtEpochMillis = 0L,
+            )
+            seen.add(identity)
+        }.take(limit)
+    }
+
+    const val MAX_ACTIVITY_COUNT = 3
 }
