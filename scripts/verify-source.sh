@@ -79,7 +79,7 @@ require("PresenceActivityDisplayFormatter" in activity_model and "PresenceActivi
 for field in ("large_image", "small_image", "large_text", "small_text", "large_url", "small_url", "buttons", "timestamps", "streamUrl"):
     require(field in protocol or field in activity_model, f"Rich Presence field support: {field}")
 require('"session_id" to sessionId' in protocol and '"seq" to sequence' in protocol, "Resume payload contains session id and sequence")
-require('"activities" to activities' in protocol and '"status" to status' in protocol, "Presence Update payload preserves selected account status")
+require('"activities" to wireActivities' in protocol and '"status" to status' in protocol, "Presence Update payload preserves selected account status")
 require("PresenceActivityMapper::fromUpdate" in (app / "src/main/java/app/geckopresence/host/PresenceEngineService.kt").read_text(), "winning source is mapped to transport-neutral activity")
 require('PresenceActivityType.LISTENING' in mapper and 'PresenceActivityType.PLAYING' in mapper, "media and non-media source type mapping exists")
 require("Log." not in publisher and "println(" not in publisher and "exception.message" not in publisher, "Gateway transport does not log frame/token/exception contents")
