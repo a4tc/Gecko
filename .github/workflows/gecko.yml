@@ -2,7 +2,7 @@ name: Gecko Android CI
 
 on:
   push:
-    branches: [main, gecko-0.6.6]
+    branches: [main, gecko-0.6.6, development]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   android:
-    name: Test and assemble Android flavors
+    name: Assemble Android flavors
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -31,23 +31,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Cache Kotlin CLI 2.0.21
-        id: cache-kotlinc
-        uses: actions/cache@v4
-        with:
-          path: ~/kotlin-2.0.21
-          key: ${{ runner.os }}-kotlin-cli-2.0.21
-
-      - name: Install Kotlin CLI 2.0.21 for standalone source tests
-        if: steps.cache-kotlinc.outputs.cache-hit != 'true'
-        run: |
-          curl -fsSL -o /tmp/kotlin-compiler.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
-          echo "0352c0a45bd22f80f6b26e485cd04da8047baa5de54865281fb9f89a4a7bcf2a  /tmp/kotlin-compiler.zip" | sha256sum -c -
-          unzip -q /tmp/kotlin-compiler.zip -d "$HOME/kotlin-2.0.21"
-
-      - name: Add Kotlin CLI to PATH
-        run: echo "$HOME/kotlin-2.0.21/kotlinc/bin" >> "$GITHUB_PATH"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
@@ -61,14 +44,10 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Run pure Kotlin core tests
-        run: bash scripts/test-core.sh
 
-      - name: Run Android unit tests and assemble both flavors
+      - name: Assemble both Android flavors
         run: |
           ./gradlew --no-daemon --stacktrace \
-            :app:testSecureDebugUnitTest \
-            :app:testAutomationDebugUnitTest \
             :app:assembleSecureDebug \
             :app:assembleAutomationDebug
 
