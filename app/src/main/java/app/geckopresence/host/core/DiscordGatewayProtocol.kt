@@ -97,6 +97,7 @@ object DiscordGatewayProtocol {
         if (type == PresenceActivityType.CUSTOM_STATUS) {
             put("name", "Custom Status")
             put("type", type.wireValue)
+            put("details", GatewayJsonNull)
             put("state", state!!)
             return@buildMap
         }
@@ -104,8 +105,8 @@ object DiscordGatewayProtocol {
         put("name", name)
         put("type", type.wireValue)
         put("status_display_type", 0)
-        details?.takeIf(String::isNotBlank)?.let { put("details", it) }
-        state?.takeIf(String::isNotBlank)?.let { put("state", it) }
+        put("details", details?.takeIf(String::isNotBlank) ?: GatewayJsonNull)
+        put("state", state?.takeIf(String::isNotBlank) ?: GatewayJsonNull)
         streamUrl?.takeIf(String::isNotBlank)?.let { put("url", it) }
         if (applicationId > 0L && (largeImage != null || smallImage != null || buttons.isNotEmpty())) {
             put("application_id", applicationId.toString())

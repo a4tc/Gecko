@@ -74,6 +74,8 @@ object DiscordGatewayProtocolSelfTest {
         check(wireActivity["name"] == "Firefox")
         check(wireActivity["type"] == 3)
         check(wireActivity["status_display_type"] == 0)
+        check(wireActivity["details"] == "Watching a video")
+        check(wireActivity["state"] == "YouTube")
         check(wireActivity["application_id"] == "1569772369344602173")
         val timestamps = wireActivity["timestamps"] as Map<*, *>
         check(timestamps["start"] == 1_700_000_000_000L)
@@ -98,6 +100,7 @@ object DiscordGatewayProtocolSelfTest {
         check(customStatusWire == mapOf(
             "name" to "Custom Status",
             "type" to 4,
+            "details" to GatewayJsonNull,
             "state" to "Taking a break",
         ))
 
@@ -181,7 +184,11 @@ object DiscordGatewayProtocolSelfTest {
             PresenceActivity(name = "Firefox"), 1569772369344602173L, nowMillis = 123L,
         ).data as Map<*, *>
         val minimalActivity = (minimalData["activities"] as List<*>).single() as Map<*, *>
-        check(minimalActivity.keys == setOf("name", "type", "status_display_type"))
+        check(minimalActivity.keys == setOf(
+            "name", "type", "status_display_type", "details", "state",
+        ))
+        check(minimalActivity["details"] == GatewayJsonNull)
+        check(minimalActivity["state"] == GatewayJsonNull)
         check("application_id" !in minimalActivity)
         check("assets" !in minimalActivity && "buttons" !in minimalActivity && "timestamps" !in minimalActivity)
 

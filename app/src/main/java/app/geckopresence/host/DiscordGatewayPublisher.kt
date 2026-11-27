@@ -508,7 +508,34 @@ class DiscordGatewayPublisher(
             .toString()
         if (!DiscordGatewayProtocol.payloadFitsLimit(payload)) throw GatewayPayloadTooLargeException()
         if (envelope.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE) {
-            onDiagnostic("Presence opcode-3 attempt bytes=${payload.toByteArray(Charsets.UTF_8).size}")
+            val activities = JSONObject(payload)
+                .optJSONObject("d")
+                ?.optJSONArray("activities")
+
+            val probe = JSONArray()
+            for (index in 0 until (activities?.length() ?: 0)) {
+                val activity = activities?.optJSONObject(index) ?: continue
+                probe.put(
+                    JSONObject()
+                        .put("type", activity.opt("type"))
+                        .put("name", activity.opt("name"))
+                        .put("details_present", activity.has("details"))
+                        .put("details", activity.opt("details"))
+                        .put("state_present", activity.has("state"))
+                        .put("state", activity.opt("state"))
+                        .put("buttons_count", activity.optJSONArray("buttons")?.length() ?: 0)
+                        .put("metadata_present", activity.has("metadata"))
+                        .put(
+                            "button_urls_count",
+                            activity.optJSONObject("metadata")
+                                ?.optJSONArray("button_urls")?.length() ?: 0
+                        )
+                )
+            }
+
+            onDiagnostic(
+                "Presence opcode-3 payload probe bytes=${payload.toByteArray(Charsets.UTF_8).size} activities=$probe"
+            )
         }
         currentSocket.send(Frame.Text(payload))
         if (envelope.op == DiscordGatewayProtocol.OP_PRESENCE_UPDATE) {
